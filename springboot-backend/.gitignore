@@ -1,0 +1,86 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+*.idea/**/workspace.xml
+*.idea/**/tasks.xml
+*.idea/**/usage.statistics.xml
+*.idea/**/dictionaries
+*.idea/**/shelf
+*.idea/**/contentModel.xml
+*.idea/**/dataSources/
+*.idea/**/dataSources.ids
+*.idea/**/dataSources.local.xml
+*.idea/**/sqlDataSources.xml
+*.idea/**/dynamic.xml
+*.idea/**/uiDesigner.xml
+*.idea/**/gradle.xml
+*.idea/**/libraries
+*.idea/**/module_settings.xml
+*.idea/**/artifacts
+*.idea/**/antProfiles.xml
+*.idea/**/jarRepositories.xml
+*.idea/**/trusted.xml
+*.idea/**/componentStates.xml
+*.idea/**/vcs.xml
+*.idea/**/git_toolbox_primer.xml
+*.idea/**/caches/build_file_checksums.ser
+
+### Eclipse ###
+.settings/
+.project
+.classpath
+bin/
+*.log
+*.tmp
+*.launch
+
+### VS Code ###
+.vscode/
+*.swp
+*.swo
+*~
+
+### Maven ###
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+### Spring Boot ###
+spring-shell.log
+
+### Database ###
+*.db
+*.sqlite
+
+### Logs ###
+logs/
+*.log
+*.tmp
+
+### OS ###
+.DS_Store
+Thumbs.db
+
+### Uploads ###
+static/uploads/
+
+### Sensitive Config ###
+# Profile files containing real credentials (application-dev.yml, application-prod.yml, etc.)
+# Only application.yml (with placeholders) and application.yml.example should be committed.
+src/main/resources/application-dev.yml
+src/main/resources/application-prod.yml
+src/main/resources/application-staging.yml

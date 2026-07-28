@@ -1,0 +1,156 @@
+groups:
+  # API 异常率告警
+  - name: api_alerts
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            /
+            sum(rate(http_server_requests_seconds_count[5m]))
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "API 异常率过高"
+          description: "过去 5 分钟内 API 异常率为 {{ $value | humanizePercentage }}，超过 5% 阈值"
+
+      - alert: HighErrorRate4xx
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{status=~"4.."}[5m]))
+            /
+            sum(rate(http_server_requests_seconds_count[5m]))
+          ) > 0.20
+        for: 2m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "API 4xx 错误率过高"
+          description: "过去 5 分钟内 4xx 错误率为 {{ $value | humanizePercentage }}"
+
+  # 响应时间告警
+  - name: latency_alerts
+    interval: 30s
+    rules:
+      - alert: HighResponseTime
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_server_requests_seconds_bucket[5m])) by (uri, le)
+          ) > 2
+        for: 3m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "API 响应时间过高 (P95 > 2s)"
+          description: "{{ $labels.uri }} 的 P95 响应时间为 {{ $value }}s"
+
+      - alert: VeryHighResponseTime
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_server_requests_seconds_bucket[5m])) by (uri, le)
+          ) > 5
+        for: 2m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "API 响应时间严重过高 (P95 > 5s)"
+          description: "{{ $labels.uri }} 的 P95 响应时间为 {{ $value }}s"
+
+  # JVM 告警
+  - name: jvm_alerts
+    interval: 30s
+    rules:
+      - alert: HighJvmMemoryUsage
+        expr: |
+          (jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"}) > 0.85
+        for: 3m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "JVM 堆内存使用率过高"
+          description: "JVM 堆内存使用率为 {{ $value | humanizePercentage }}"
+
+      - alert: HighJvmThreadCount
+        expr: jvm_threads_live_threads > 500
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "JVM 线程数过高"
+          description: "当前活跃线程数: {{ $value }}"
+
+      - alert: HighCpuUsage
+        expr: |
+          (
+            sum(rate(process_cpu_seconds_total[5m])) * 100
+          ) > 85
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "应用 CPU 使用率过高"
+          description: "过去 5 分钟 CPU 使用率为 {{ $value }}%"
+
+  # 业务指标告警
+  - name: business_alerts
+    interval: 60s
+    rules:
+      - alert: UserLoginFailureSpike
+        expr: |
+          (
+            rate(business_user_login_total{result="fail"}[5m])
+            /
+            rate(business_user_login_total[5m])
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "用户登录失败率过高（可能存在暴力破解）"
+          description: "登录失败率为 {{ $value | humanizePercentage }}"
+
+      - alert: AiRecognitionFailureSpike
+        expr: |
+          rate(business_ai_recognition_total{result="fail"}[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "AI 识别失败率过高"
+          description: "过去 5 分钟内 AI 识别失败率突增"
+
+  # 系统告警
+  - name: system_alerts
+    interval: 30s
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "服务不可用"
+          description: "{{ $labels.job }} 服务已下线超过 1 分钟"
+
+      - alert: DatabaseConnectionsHigh
+        expr: |
+          hikaricp_connections_active / hikaricp_connections_max > 0.8
+        for: 3m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "数据库连接池使用率过高"
+          description: "数据库连接池使用率为 {{ $value | humanizePercentage }}"

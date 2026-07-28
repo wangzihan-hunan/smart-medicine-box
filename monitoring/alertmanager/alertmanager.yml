@@ -1,0 +1,47 @@
+global:
+  smtp_smarthost: 'smtp.example.com:465'
+  smtp_from: 'alert@medicine-box.com'
+  smtp_auth_username: 'alert@medicine-box.com'
+  smtp_auth_password: 'password'
+  smtp_require_tls: false
+
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default-receiver'
+  routes:
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      continue: true
+    - match:
+        team: security
+      receiver: 'security-receiver'
+
+receivers:
+  - name: 'default-receiver'
+    email_configs:
+      - to: 'admin@medicine-box.com'
+        send_resolved: true
+
+  - name: 'critical-receiver'
+    email_configs:
+      - to: 'ops@medicine-box.com,admin@medicine-box.com'
+        send_resolved: true
+    webhook_configs:
+      - url: 'http://app:8080/api/v1/admin/alerts/webhook'
+        send_resolved: true
+
+  - name: 'security-receiver'
+    email_configs:
+      - to: 'security@medicine-box.com'
+        send_resolved: true
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'dev', 'instance']

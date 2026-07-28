@@ -1,0 +1,113 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:9456/medicine_box}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:wzh@10086}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: MedicineBoxHikariCP
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          time_zone: Asia/Shanghai
+
+  flyway:
+    enabled: false
+
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+  web:
+    resources:
+      static-locations: classpath:/static/,file:./qianduan/dist/
+
+  application:
+    name: medicine-box
+
+jwt:
+  secret: ${JWT_SECRET:please-change-this-secret-in-production}
+  expiration: ${JWT_EXPIRATION:604800000}
+
+file:
+  upload-dir: ${UPLOAD_DIR:./static/uploads/}
+
+cors:
+  allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3002}
+
+# AI 视觉识别配置（阿里百炼通义千问）
+ai:
+  qwen:
+    enabled: ${AI_QWEN_ENABLED:false}
+    api-key: ${AI_QWEN_API_KEY:}
+    model: ${AI_QWEN_MODEL:qwen-vl-max}
+    timeout: ${AI_QWEN_TIMEOUT:30000}
+    max-image-size: ${AI_QWEN_MAX_IMAGE_SIZE:512000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+    prometheus:
+      access: read_only
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      percentiles:
+        http.server.requests: 0.5, 0.75, 0.95, 0.99
+      sla:
+        http.server.requests: 100ms, 200ms, 500ms, 1s, 2s
+    tags:
+      application: ${spring.application.name:medicine-box}
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+        step: 60s
+        descriptions: true
+
+# 告警配置
+alerting:
+  enabled: ${ALERTING_ENABLED:true}
+  email:
+    enabled: ${ALERTING_EMAIL_ENABLED:false}
+    from: ${ALERTING_EMAIL_FROM:alert@medicine-box.com}
+    to: ${ALERTING_EMAIL_TO:admin@medicine-box.com}
+    host: ${ALERTING_EMAIL_HOST:smtp.example.com}
+    port: ${ALERTING_EMAIL_PORT:465}
+    username: ${ALERTING_EMAIL_USERNAME:}
+    password: ${ALERTING_EMAIL_PASSWORD:}
+  rules:
+    error-rate:
+      threshold: 0.05
+      window-seconds: 300
+    response-time:
+      threshold-ms: 2000
+      window-seconds: 300
+    cpu-usage:
+      threshold: 0.85
+    memory-usage:
+      threshold: 0.90
