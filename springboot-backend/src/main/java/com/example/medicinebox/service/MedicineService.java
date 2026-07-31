@@ -1,5 +1,6 @@
 package com.example.medicinebox.service;
 
+import com.example.medicinebox.constant.BusinessConstants;
 import com.example.medicinebox.dto.request.MedicineCreateRequest;
 import com.example.medicinebox.dto.response.MedicineListResponse;
 import com.example.medicinebox.dto.response.MedicineResponse;
@@ -7,19 +8,23 @@ import com.example.medicinebox.entity.Medicine;
 import com.example.medicinebox.entity.User;
 import com.example.medicinebox.exception.ResourceNotFoundException;
 import com.example.medicinebox.repository.MedicineRepository;
+import com.example.medicinebox.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.persistence.criteria.Predicate;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -28,6 +33,7 @@ import com.opencsv.CSVWriter;
 /**
  * 药品管理服务类
  * 核心功能：药品的增删改查、低库存/过期药品查询、药品分类管理、CSV导出等
+ * 查询使用 JPA Specification 动态构建，支持任意条件组合
  */
 @Service
 public class MedicineService extends BaseService {
@@ -41,7 +47,8 @@ public class MedicineService extends BaseService {
      *
      * @param medicineRepository 药品数据访问层
      */
-    public MedicineService(MedicineRepository medicineRepository) {
+    public MedicineService(UserRepository userRepository, MedicineRepository medicineRepository) {
+        super(userRepository);
         this.medicineRepository = medicineRepository;
     }
 
@@ -64,7 +71,7 @@ public class MedicineService extends BaseService {
         medicine.setManufacturer(request.getManufacturer());
         medicine.setStock(request.getStock());
         medicine.setExpireDate(request.getExpireDate());
-        medicine.setLowStockThreshold(request.getLowStockThreshold() != null ? request.getLowStockThreshold() : 5);
+        medicine.setLowStockThreshold(request.getLowStockThreshold() != null ? request.getLowStockThreshold() : BusinessConstants.DEFAULT_LOW_STOCK_THRESHOLD);
         medicine.setUserId(user.getId());
 
         medicine = medicineRepository.save(medicine);
@@ -75,7 +82,7 @@ public class MedicineService extends BaseService {
 
     /**
      * 分页查询药品列表
-     * 支持多条件筛选：关键词搜索、分类筛选、低库存筛选、过期药品筛选
+     * 使用 JPA Specification 动态构建查询条件，支持任意条件组合（关键词、分类、低库存、过期可同时使用）
      *
      * @param page 页码（从0开始）
      * @param size 每页大小
@@ -92,24 +99,9 @@ public class MedicineService extends BaseService {
                 user.getId(), keyword, category, lowStock, expired);
 
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<Medicine> medicinePage;
 
-        // 按优先级选择查询条件：过期 > 低库存 > 分类+关键词 > 分类 > 关键词 > 全部
-        if (expired != null && expired) {
-            medicinePage = medicineRepository.findByUserIdAndExpireDateBefore(user.getId(), LocalDateTime.now(), pageable);
-        } else if (lowStock != null) {
-            medicinePage = medicineRepository.findByUserIdAndStockLessThanEqual(user.getId(), lowStock, pageable);
-        } else if (category != null && !category.isEmpty()) {
-            if (keyword != null && !keyword.isEmpty()) {
-                medicinePage = medicineRepository.findByUserIdAndNameContainingAndCategory(user.getId(), keyword, category, pageable);
-            } else {
-                medicinePage = medicineRepository.findByUserIdAndCategory(user.getId(), category, pageable);
-            }
-        } else if (keyword != null && !keyword.isEmpty()) {
-            medicinePage = medicineRepository.findByUserIdAndNameContaining(user.getId(), keyword, pageable);
-        } else {
-            medicinePage = medicineRepository.findByUserId(user.getId(), pageable);
-        }
+        Specification<Medicine> spec = buildQuerySpecification(user.getId(), keyword, category, lowStock, expired);
+        Page<Medicine> medicinePage = medicineRepository.findAll(spec, pageable);
         
         List<MedicineResponse> responseList = medicinePage.getContent().stream()
                 .map(MedicineResponse::fromEntity)
@@ -122,6 +114,42 @@ public class MedicineService extends BaseService {
                 medicinePage.getNumber(),
                 responseList
         );
+    }
+
+    /**
+     * 动态构建查询条件
+     * 所有非空条件以 AND 方式组合，支持同时筛选过期+低库存+关键词+分类
+     */
+    private Specification<Medicine> buildQuerySpecification(Integer userId, String keyword, 
+                                                             String category, Integer lowStock, Boolean expired) {
+        return (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+
+            // 基础条件：限定当前用户
+            predicates.add(cb.equal(root.get("userId"), userId));
+
+            // 关键词模糊搜索
+            if (keyword != null && !keyword.isEmpty()) {
+                predicates.add(cb.like(root.get("name"), "%" + keyword + "%"));
+            }
+
+            // 分类筛选
+            if (category != null && !category.isEmpty()) {
+                predicates.add(cb.equal(root.get("category"), category));
+            }
+
+            // 低库存筛选
+            if (lowStock != null) {
+                predicates.add(cb.lessThanOrEqualTo(root.get("stock"), lowStock));
+            }
+
+            // 过期药品筛选
+            if (expired != null && expired) {
+                predicates.add(cb.lessThan(root.get("expireDate"), LocalDateTime.now()));
+            }
+
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
     }
 
     /**
@@ -215,7 +243,7 @@ public class MedicineService extends BaseService {
 
     /**
      * 获取低库存药品列表
-     * 库存小于等于低库存阈值的药品
+     * 数据库层面比较 stock <= low_stock_threshold，避免全量加载后内存过滤
      *
      * @return 低库存药品响应列表
      */
@@ -223,11 +251,7 @@ public class MedicineService extends BaseService {
         User user = getCurrentUser();
         log.debug("查询低库存药品, 用户ID: {}", user.getId());
         
-        List<Medicine> medicines = medicineRepository.findByUserId(user.getId());
-        List<Medicine> lowStockMedicines = medicines.stream()
-                .filter(m -> m.getStock() != null && 
-                        (m.getLowStockThreshold() == null || m.getStock() <= m.getLowStockThreshold()))
-                .collect(Collectors.toList());
+        List<Medicine> lowStockMedicines = medicineRepository.findLowStockByUserId(user.getId());
         
         log.debug("查询低库存药品成功, 用户ID: {}, 数量: {}", user.getId(), lowStockMedicines.size());
         return lowStockMedicines.stream()
@@ -254,7 +278,17 @@ public class MedicineService extends BaseService {
     }
 
     /**
-     * 获取用户所有药品分类（去重）
+     * 获取当前登录用户ID
+     * 供 Controller 层获取当前用户标识使用
+     *
+     * @return 当前用户ID
+     */
+    public Integer getCurrentUserId() {
+        return getCurrentUser().getId();
+    }
+
+    /**
+     * 获取用户所有药品分类（数据库层面去重）
      *
      * @return 分类名称列表
      */
@@ -262,13 +296,7 @@ public class MedicineService extends BaseService {
         User user = getCurrentUser();
         log.debug("查询药品分类, 用户ID: {}", user.getId());
         
-        List<Medicine> medicines = medicineRepository.findByUserId(user.getId());
-        // 提取分类并去重，过滤空值
-        return medicines.stream()
-                .map(Medicine::getCategory)
-                .filter(c -> c != null && !c.isEmpty())
-                .distinct()
-                .collect(Collectors.toList());
+        return medicineRepository.findDistinctCategoriesByUserId(user.getId());
     }
 
     /**

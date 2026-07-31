@@ -82,4 +82,17 @@ public class Prescription {
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
     }
+
+    // ==================== 领域方法 ====================
+
+    /** 更新诊断结果和用药说明 */
+    public void updateInfo(String diagnosis, String dosageInstructions) {
+        this.diagnosis = diagnosis;
+        this.dosageInstructions = dosageInstructions;
+    }
+
+    /** 关联药品（AI识别后关联） */
+    public void associateMedicine(Integer medicineId) {
+        this.medicineId = medicineId;
+    }
 }

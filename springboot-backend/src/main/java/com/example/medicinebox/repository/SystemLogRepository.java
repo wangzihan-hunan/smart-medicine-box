@@ -68,7 +68,7 @@ public interface SystemLogRepository extends JpaRepository<SystemLog, Integer> {
      * @return 最近10条日志列表
      */
     @Query("SELECT l FROM SystemLog l ORDER BY l.createdAt DESC")
-    List<SystemLog> findTop10ByOrderByCreatedAtDesc();
+    Page<SystemLog> findTop10ByOrderByCreatedAtDesc(Pageable pageable);
 
     /**
      * 查询指定用户最近10条日志（按创建时间降序）
@@ -76,7 +76,7 @@ public interface SystemLogRepository extends JpaRepository<SystemLog, Integer> {
      * @return 最近10条日志列表
      */
     @Query("SELECT l FROM SystemLog l WHERE l.userId = :userId ORDER BY l.createdAt DESC")
-    List<SystemLog> findTop10ByUserIdOrderByCreatedAtDesc(@Param("userId") Integer userId);
+    Page<SystemLog> findTop10ByUserIdOrderByCreatedAtDesc(@Param("userId") Integer userId, Pageable pageable);
 
     /**
      * 查询所有不重复的模块名称（按模块名排序）

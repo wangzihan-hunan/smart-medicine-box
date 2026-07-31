@@ -1,5 +1,8 @@
 package com.example.medicinebox.dto.request;
 
+import com.example.medicinebox.constant.UserPlan;
+import com.example.medicinebox.constant.UserRole;
+
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.Pattern;
 
@@ -23,10 +26,10 @@ public class AdminCreateUserRequest {
     private String password;
 
     // 用户角色（默认值：USER）
-    private String role = "USER";
+    private String role = UserRole.USER.name();
 
     // 用户套餐（默认值：FREE）
-    private String plan = "FREE";
+    private String plan = UserPlan.FREE.name();
 
     // 每月AI使用次数限制（默认值：10）
     private Integer monthAiLimit = 10;

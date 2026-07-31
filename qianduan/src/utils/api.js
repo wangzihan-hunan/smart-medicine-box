@@ -10,7 +10,7 @@ import axios from 'axios'
 const API_BASE_URL = '/api/v1'
 /** 缓存有效期：5 分钟（毫秒） */
 const CACHE_TTL = 5 * 60 * 1000
-/** Token 存储键名（统一使用 JSON 对象存储） */
+/** Token 存储键名（统一使用 JSON 对象存储，sessionStorage 降低 XSS 持久化风险） */
 const TOKEN_KEY = 'medicine-box-auth'
 
 // ==================== 全局状态 ====================
@@ -226,7 +226,7 @@ instance.interceptors.response.use(
  */
 export function getToken() {
   try {
-    const authData = localStorage.getItem(TOKEN_KEY)
+    const authData = sessionStorage.getItem(TOKEN_KEY)
     if (authData) {
       const parsed = JSON.parse(authData)
       return parsed.token || null
@@ -244,9 +244,9 @@ export function getToken() {
  */
 export function setToken(token) {
   const authData = JSON.stringify({ token, timestamp: Date.now() })
-  localStorage.setItem(TOKEN_KEY, authData)
+  sessionStorage.setItem(TOKEN_KEY, authData)
   // 清理旧版存储（兼容过渡）
-  localStorage.removeItem('access_token')
+  sessionStorage.removeItem('access_token')
 }
 
 /**
@@ -254,8 +254,8 @@ export function setToken(token) {
  * 同时清理新版和旧版存储键
  */
 export function removeToken() {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem('access_token')
+  sessionStorage.removeItem(TOKEN_KEY)
+  sessionStorage.removeItem('access_token')
 }
 
 // ==================== 缓存管理 ====================

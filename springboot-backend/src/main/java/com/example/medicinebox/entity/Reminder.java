@@ -64,6 +64,10 @@ public class Reminder {
     @Column(name = "is_repeat")
     private Boolean isRepeat = false;
 
+    // 是否激活，true-提醒有效，false-提醒已暂停/取消
+    @Column(name = "is_active")
+    private Boolean isActive = true;
+
     // 是否已服用，true-已服用，false-未服用
     @Column
     private Boolean taken = false;
@@ -126,6 +130,7 @@ public class Reminder {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
         if (isRepeat == null) isRepeat = false;
+        if (isActive == null) isActive = true;
         if (taken == null) taken = false;
         if (frequency == null) frequency = "每日一次";
         if (nextRemindTime == null) {
@@ -164,5 +169,63 @@ public class Reminder {
     @PreUpdate
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
+    }
+
+    // ==================== 领域方法 ====================
+
+    /**
+     * 处理重复提醒的结束条件
+     * 支持按次数结束（count）和按日期结束（endDate）两种模式
+     *
+     * @return true-已达到结束条件，不应再触发；false-未达到，可继续触发
+     */
+    public boolean shouldStopRepeat() {
+        if (!Boolean.TRUE.equals(isRepeat)) {
+            return false;
+        }
+
+        // 按次数结束：触发次数达到上限后自动停用
+        if ("count".equals(repeatEndType) && repeatCount != null) {
+            int newCount = (triggeredCount != null ? triggeredCount : 0) + 1;
+            triggeredCount = newCount;
+            if (newCount >= repeatCount) {
+                isActive = false;
+                return true;
+            }
+        }
+
+        // 按日期结束：超过结束日期后自动停用
+        if ("endDate".equals(repeatEndType) && repeatEndDate != null) {
+            if (LocalDate.now().isAfter(repeatEndDate)) {
+                isActive = false;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 更新重复提醒的下次触发时间
+     * 根据提醒时间和当前日期计算下次触发时间
+     */
+    public void advanceToNextRemindTime() {
+        try {
+            LocalTime remindTime = LocalTime.parse(time);
+            LocalDate nextDate = LocalDate.now().plusDays(1);
+            nextRemindTime = LocalDateTime.of(nextDate, remindTime);
+        } catch (Exception e) {
+            // 解析失败时保持现有值
+        }
+    }
+
+    /** 标记为已服用 */
+    public void markTaken() {
+        this.taken = true;
+    }
+
+    /** 停用提醒 */
+    public void deactivate() {
+        this.isActive = false;
     }
 }

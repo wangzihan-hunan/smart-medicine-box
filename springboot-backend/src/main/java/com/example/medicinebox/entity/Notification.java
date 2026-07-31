@@ -1,5 +1,8 @@
 package com.example.medicinebox.entity;
 
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import javax.persistence.*;
 import java.time.LocalDateTime;
 
@@ -10,6 +13,8 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "notifications")
+@Data
+@NoArgsConstructor
 public class Notification {
 
     // 通知唯一标识，主键自增
@@ -51,9 +56,6 @@ public class Notification {
         createdAt = LocalDateTime.now();
     }
 
-    public Notification() {
-    }
-
     public Notification(Integer userId, String title, String content, String type) {
         this.userId = userId;
         this.title = title;
@@ -62,67 +64,16 @@ public class Notification {
         this.readStatus = false;
     }
 
-    public Integer getId() {
-        return id;
+    // ==================== 领域方法 ====================
+
+    /** 标记通知为已读 */
+    public void markAsRead() {
+        this.readStatus = true;
+        this.readAt = LocalDateTime.now();
     }
 
-    public void setId(Integer id) {
-        this.id = id;
-    }
-
-    public Integer getUserId() {
-        return userId;
-    }
-
-    public void setUserId(Integer userId) {
-        this.userId = userId;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public void setTitle(String title) {
-        this.title = title;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public String getType() {
-        return type;
-    }
-
-    public void setType(String type) {
-        this.type = type;
-    }
-
-    public Boolean getReadStatus() {
-        return readStatus;
-    }
-
-    public void setReadStatus(Boolean readStatus) {
-        this.readStatus = readStatus;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getReadAt() {
-        return readAt;
-    }
-
-    public void setReadAt(LocalDateTime readAt) {
-        this.readAt = readAt;
+    /** 通知是否已读 */
+    public boolean isRead() {
+        return Boolean.TRUE.equals(readStatus);
     }
 }

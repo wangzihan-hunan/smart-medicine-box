@@ -1,5 +1,6 @@
 package com.example.medicinebox.controller;
 
+import com.example.medicinebox.constant.UserRole;
 import com.example.medicinebox.dto.request.AdminCreateUserRequest;
 import com.example.medicinebox.dto.response.BaseResponse;
 import com.example.medicinebox.dto.response.LoginResponse;
@@ -7,9 +8,12 @@ import com.example.medicinebox.dto.response.UserInfoResponse;
 import com.example.medicinebox.dto.response.UserListResponse;
 import com.example.medicinebox.entity.SystemLog;
 import com.example.medicinebox.entity.User;
+import com.example.medicinebox.service.AdminUserService;
 import com.example.medicinebox.service.AuthService;
+import com.example.medicinebox.service.BatchUserService;
 import com.example.medicinebox.service.PlanService;
 import com.example.medicinebox.service.SystemLogService;
+import com.example.medicinebox.service.UserStatisticsService;
 import com.example.medicinebox.util.PaginationUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,13 +42,21 @@ public class AdminController {
     private static final Logger log = LoggerFactory.getLogger(AdminController.class);
 
     private final AuthService authService;
+    private final AdminUserService adminUserService;
+    private final UserStatisticsService userStatisticsService;
     private final PlanService planService;
     private final SystemLogService systemLogService;
+    private final BatchUserService batchUserService;
 
-    public AdminController(AuthService authService, PlanService planService, SystemLogService systemLogService) {
+    public AdminController(AuthService authService, AdminUserService adminUserService,
+                           UserStatisticsService userStatisticsService, PlanService planService,
+                           SystemLogService systemLogService, BatchUserService batchUserService) {
         this.authService = authService;
+        this.adminUserService = adminUserService;
+        this.userStatisticsService = userStatisticsService;
         this.planService = planService;
         this.systemLogService = systemLogService;
+        this.batchUserService = batchUserService;
     }
 
     /**
@@ -60,16 +72,16 @@ public class AdminController {
     public BaseResponse<LoginResponse> adminLogin(@RequestBody com.example.medicinebox.dto.request.UserLoginRequest request) {
         log.info("管理员登录请求, 手机号: {}", request.getPhone());
         
-        LoginResponse response = authService.login(request);
-        
-        com.example.medicinebox.entity.User user = authService.getUserEntityByPhone(request.getPhone());
-        if (user != null && "ADMIN".equals(user.getRole())) {
-            log.info("管理员登录成功, 手机号: {}", request.getPhone());
-            return BaseResponse.success("登录成功！", response);
-        } else {
+        // 先校验角色，避免为非管理员生成无效 token
+        User user = adminUserService.getUserEntityByPhone(request.getPhone());
+        if (user == null || UserRole.ADMIN != user.getRole()) {
             log.warn("非管理员账号尝试登录管理后台, 手机号: {}", request.getPhone());
             return BaseResponse.error(403, "无管理员权限");
         }
+        
+        LoginResponse response = authService.login(request);
+        log.info("管理员登录成功, 手机号: {}", request.getPhone());
+        return BaseResponse.success("登录成功！", response);
     }
 
     /**
@@ -87,23 +99,11 @@ public class AdminController {
         
         Map<String, Object> dashboard = new HashMap<>();
         
-        UserListResponse userList = authService.getAllUsers();
-        dashboard.put("totalUsers", userList.getTotalElements());
-        
-        long activeUsers = userList.getList().stream()
-                .filter(u -> "ACTIVE".equals(u.getStatus()))
-                .count();
-        dashboard.put("activeUsers", activeUsers);
-        
-        long adminUsers = userList.getList().stream()
-                .filter(u -> "ADMIN".equals(u.getRole()))
-                .count();
-        dashboard.put("adminUsers", adminUsers);
-        
-        long paidUsers = userList.getList().stream()
-                .filter(u -> !"FREE".equals(u.getPlan()))
-                .count();
-        dashboard.put("paidUsers", paidUsers);
+        Map<String, Long> stats = userStatisticsService.getUserStats();
+        dashboard.put("totalUsers", stats.get("totalUsers"));
+        dashboard.put("activeUsers", stats.get("activeUsers"));
+        dashboard.put("adminUsers", stats.get("adminUsers"));
+        dashboard.put("paidUsers", stats.get("paidUsers"));
         
         return BaseResponse.success("获取成功", dashboard);
     }
@@ -130,9 +130,9 @@ public class AdminController {
         log.info("获取用户列表, keyword: {}, page: {}, size: {}", keyword, validatedPage, validatedSize);
         UserListResponse response;
         if (keyword != null && !keyword.isEmpty()) {
-            response = authService.searchUsers(keyword, validatedPage, validatedSize);
+            response = adminUserService.searchUsers(keyword, validatedPage, validatedSize);
         } else {
-            response = authService.getAllUsers(validatedPage, validatedSize);
+            response = adminUserService.getAllUsers(validatedPage, validatedSize);
         }
         return BaseResponse.success("获取成功", response);
     }
@@ -149,7 +149,7 @@ public class AdminController {
     @PreAuthorize("hasRole('ADMIN')")
     public BaseResponse<UserInfoResponse> getUser(@PathVariable Integer id) {
         log.info("获取用户详情, ID: {}", id);
-        UserInfoResponse response = authService.getUserById(id);
+        UserInfoResponse response = adminUserService.getUserById(id);
         if (response == null) {
             return BaseResponse.error(404, "用户不存在");
         }
@@ -171,7 +171,7 @@ public class AdminController {
             @PathVariable Integer id,
             @RequestParam String status) {
         log.info("更新用户状态, ID: {}, status: {}", id, status);
-        authService.updateUserStatus(id, status);
+        adminUserService.updateUserStatus(id, status);
         return BaseResponse.success("更新成功");
     }
 
@@ -190,7 +190,7 @@ public class AdminController {
             @PathVariable Integer id,
             @RequestParam String name) {
         log.info("更新用户姓名, ID: {}, name: {}", id, name);
-        authService.updateUserName(id, name);
+        adminUserService.updateUserName(id, name);
         return BaseResponse.success("姓名更新成功", null);
     }
 
@@ -209,7 +209,7 @@ public class AdminController {
             @PathVariable Integer id,
             @RequestParam String role) {
         log.info("更新用户角色, ID: {}, role: {}", id, role);
-        authService.updateUserRole(id, role);
+        adminUserService.updateUserRole(id, role);
         return BaseResponse.success("角色更新成功", null);
     }
 
@@ -228,7 +228,7 @@ public class AdminController {
             @PathVariable Integer id,
             @RequestParam(defaultValue = "123456") String newPassword) {
         log.info("重置用户密码, ID: {}", id);
-        authService.resetUserPassword(id, newPassword);
+        adminUserService.resetUserPassword(id, newPassword);
         return BaseResponse.success("密码重置成功", null);
     }
 
@@ -268,7 +268,7 @@ public class AdminController {
             @PathVariable Integer id,
             @RequestParam Integer limit) {
         log.info("更新用户AI限额, ID: {}, limit: {}", id, limit);
-        authService.updateMonthAiLimit(id, limit);
+        adminUserService.updateMonthAiLimit(id, limit);
         return BaseResponse.success("更新成功");
     }
 
@@ -284,8 +284,8 @@ public class AdminController {
     @PreAuthorize("hasRole('ADMIN')")
     public BaseResponse<UserInfoResponse> createUser(@Valid @RequestBody AdminCreateUserRequest request) {
         log.info("管理员创建用户, 手机号: {}", request.getPhone());
-        User user = authService.createUserByAdmin(request);
-        UserInfoResponse response = authService.getUserById(user.getId());
+        User user = adminUserService.createUserByAdmin(request);
+        UserInfoResponse response = adminUserService.getUserById(user.getId());
         return BaseResponse.success("创建成功", response);
     }
 
@@ -307,7 +307,7 @@ public class AdminController {
             return BaseResponse.error(403, "管理员密码验证失败");
         }
         log.info("删除用户, ID: {}", id);
-        authService.deleteUser(id);
+        adminUserService.deleteUser(id);
         return BaseResponse.success("删除成功");
     }
 
@@ -331,7 +331,7 @@ public class AdminController {
             return BaseResponse.error(403, "管理员密码验证失败");
         }
         log.info("封禁用户, ID: {}, reason: {}", id, reason);
-        authService.blockUser(id, reason);
+        adminUserService.blockUser(id, reason);
         return BaseResponse.success("封禁成功");
     }
 
@@ -353,7 +353,7 @@ public class AdminController {
             return BaseResponse.error(403, "管理员密码验证失败");
         }
         log.info("冻结用户, ID: {}", id);
-        authService.freezeUser(id);
+        adminUserService.freezeUser(id);
         return BaseResponse.success("冻结成功");
     }
 
@@ -375,7 +375,7 @@ public class AdminController {
             return BaseResponse.error(403, "管理员密码验证失败");
         }
         log.info("解封用户, ID: {}", id);
-        authService.unblockUser(id);
+        adminUserService.unblockUser(id);
         return BaseResponse.success("解封成功");
     }
 
@@ -392,7 +392,7 @@ public class AdminController {
             return false;
         }
         String adminPhone = authentication.getName();
-        return authService.verifyAdminPassword(adminPhone, password);
+        return adminUserService.verifyAdminPassword(adminPhone, password);
     }
 
     /**
@@ -407,7 +407,7 @@ public class AdminController {
     @PreAuthorize("hasRole('ADMIN')")
     public BaseResponse<Integer> batchDeleteUsers(@RequestBody List<Integer> ids) {
         log.info("批量删除用户, IDs: {}", ids);
-        int deletedCount = authService.batchDeleteUsers(ids);
+        int deletedCount = batchUserService.batchDeleteUsers(ids);
         return BaseResponse.success("批量删除完成，共删除 " + deletedCount + " 个用户", deletedCount);
     }
 
@@ -426,7 +426,7 @@ public class AdminController {
         List<Integer> ids = (List<Integer>) request.get("ids");
         String status = (String) request.get("status");
         log.info("批量更新用户状态, IDs: {}, status: {}", ids, status);
-        int updatedCount = authService.batchUpdateUserStatus(ids, status);
+        int updatedCount = batchUserService.batchUpdateUserStatus(ids, status);
         return BaseResponse.success("批量更新完成，共更新 " + updatedCount + " 个用户", updatedCount);
     }
 
@@ -445,7 +445,7 @@ public class AdminController {
         List<Integer> ids = (List<Integer>) request.get("ids");
         String role = (String) request.get("role");
         log.info("批量更新用户角色, IDs: {}, role: {}", ids, role);
-        int updatedCount = authService.batchUpdateUserRole(ids, role);
+        int updatedCount = batchUserService.batchUpdateUserRole(ids, role);
         return BaseResponse.success("批量更新完成，共更新 " + updatedCount + " 个用户", updatedCount);
     }
 

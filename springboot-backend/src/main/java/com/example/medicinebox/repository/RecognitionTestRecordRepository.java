@@ -54,4 +54,27 @@ public interface RecognitionTestRecordRepository extends JpaRepository<Recogniti
     @Query("SELECT r.recognitionMethod, COUNT(r), SUM(CASE WHEN r.success = true THEN 1 ELSE 0 END), " +
            "AVG(r.costTimeMs) FROM RecognitionTestRecord r WHERE r.batchId = ?1 GROUP BY r.recognitionMethod")
     List<Object[]> getStatisticsByMethod(String batchId);
+
+    /**
+     * 获取所有不重复的批次ID（数据库层面去重，避免全量加载）
+     */
+    @Query("SELECT DISTINCT r.batchId FROM RecognitionTestRecord r ORDER BY r.batchId")
+    List<String> findDistinctBatchIds();
+
+    /**
+     * 聚合统计指定批次的整体数据（一次查询替代全量加载+内存遍历）
+     * 返回：[总数, 成功数, 总耗时, 总药品数]
+     */
+    @Query("SELECT COUNT(r), SUM(CASE WHEN r.success = true THEN 1 ELSE 0 END), " +
+           "COALESCE(SUM(r.costTimeMs), 0), COALESCE(SUM(r.medicineCount), 0) " +
+           "FROM RecognitionTestRecord r WHERE r.batchId = ?1")
+    List<Object[]> getBatchAggregateStats(String batchId);
+
+    /**
+     * 按图片类型统计指定批次的识别结果（数据库层面去重）
+     * 返回：[图片类型, 总数, 成功数]
+     */
+    @Query("SELECT r.imageType, COUNT(r), SUM(CASE WHEN r.success = true THEN 1 ELSE 0 END) " +
+           "FROM RecognitionTestRecord r WHERE r.batchId = ?1 GROUP BY r.imageType")
+    List<Object[]> getBatchTypeStats(String batchId);
 }

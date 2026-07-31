@@ -124,7 +124,7 @@ onMounted(() => {
     })
   }
 
-  // 如果页面刷新后已有 Token（Pinia 从 localStorage 恢复），主动建立 WebSocket 连接
+  // 如果页面刷新后已有 Token（Pinia 从 sessionStorage 恢复），主动建立 WebSocket 连接
   if (authStore.isLoggedIn) {
     wsConnect()
   }

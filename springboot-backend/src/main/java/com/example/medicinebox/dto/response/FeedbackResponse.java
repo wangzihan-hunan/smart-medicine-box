@@ -59,7 +59,7 @@ public class FeedbackResponse {
                 feedback.getTitle(),
                 feedback.getContent(),
                 feedback.getContact(),
-                feedback.getStatus(),
+                feedback.getStatus().name(),
                 feedback.getReply(),
                 feedback.getCreatedAt() != null ? feedback.getCreatedAt().toString() : null,
                 feedback.getRepliedAt() != null ? feedback.getRepliedAt().toString() : null

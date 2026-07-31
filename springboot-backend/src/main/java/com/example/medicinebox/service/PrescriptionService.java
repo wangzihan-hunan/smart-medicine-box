@@ -1,5 +1,6 @@
 package com.example.medicinebox.service;
 
+import com.example.medicinebox.config.FileUploadProperties;
 import com.example.medicinebox.dto.response.PrescriptionListResponse;
 import com.example.medicinebox.dto.response.PrescriptionResponse;
 import com.example.medicinebox.entity.Prescription;
@@ -7,9 +8,10 @@ import com.example.medicinebox.entity.User;
 import com.example.medicinebox.exception.BadRequestException;
 import com.example.medicinebox.exception.ResourceNotFoundException;
 import com.example.medicinebox.repository.PrescriptionRepository;
+import com.example.medicinebox.repository.UserRepository;
+import com.example.medicinebox.util.PaginationUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -22,12 +24,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -41,63 +38,19 @@ public class PrescriptionService extends BaseService {
     private static final Logger log = LoggerFactory.getLogger(PrescriptionService.class);
 
     private final PrescriptionRepository prescriptionRepository;
-
-    // 文件上传目录（从配置文件读取）
-    @Value("${file.upload-dir}")
-    private String uploadDir;
-
-    // 文件名格式化器
-    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
-
-    // 允许上传的文件扩展名集合
-    private static final Set<String> ALLOWED_EXTENSIONS = new HashSet<>();
-    // 各扩展名对应的允许MIME类型映射
-    private static final Map<String, Set<String>> ALLOWED_MIME_TYPES;
-
-    // 静态初始化：配置允许的文件类型和对应的MIME类型
-    static {
-        ALLOWED_EXTENSIONS.add("pdf");
-        ALLOWED_EXTENSIONS.add("jpg");
-        ALLOWED_EXTENSIONS.add("jpeg");
-        ALLOWED_EXTENSIONS.add("png");
-        ALLOWED_EXTENSIONS.add("gif");
-        ALLOWED_EXTENSIONS.add("webp");
-
-        ALLOWED_MIME_TYPES = new java.util.HashMap<>();
-        Set<String> pdfMime = new HashSet<>();
-        pdfMime.add("application/pdf");
-        ALLOWED_MIME_TYPES.put("pdf", pdfMime);
-
-        Set<String> jpgMime = new HashSet<>();
-        jpgMime.add("image/jpeg");
-        jpgMime.add("image/pjpeg");
-        ALLOWED_MIME_TYPES.put("jpg", jpgMime);
-
-        Set<String> jpegMime = new HashSet<>();
-        jpegMime.add("image/jpeg");
-        jpegMime.add("image/pjpeg");
-        ALLOWED_MIME_TYPES.put("jpeg", jpegMime);
-
-        Set<String> pngMime = new HashSet<>();
-        pngMime.add("image/png");
-        ALLOWED_MIME_TYPES.put("png", pngMime);
-
-        Set<String> gifMime = new HashSet<>();
-        gifMime.add("image/gif");
-        ALLOWED_MIME_TYPES.put("gif", gifMime);
-
-        Set<String> webpMime = new HashSet<>();
-        webpMime.add("image/webp");
-        ALLOWED_MIME_TYPES.put("webp", webpMime);
-    }
+    private final FileUploadProperties fileUploadProperties;
 
     /**
-     * 构造函数，注入药方数据访问层
+     * 构造函数，注入依赖
      *
      * @param prescriptionRepository 药方数据访问层
+     * @param fileUploadProperties 文件上传配置
      */
-    public PrescriptionService(PrescriptionRepository prescriptionRepository) {
+    public PrescriptionService(UserRepository userRepository, PrescriptionRepository prescriptionRepository,
+                               FileUploadProperties fileUploadProperties) {
+        super(userRepository);
         this.prescriptionRepository = prescriptionRepository;
+        this.fileUploadProperties = fileUploadProperties;
     }
 
     /**
@@ -129,22 +82,19 @@ public class PrescriptionService extends BaseService {
         }
 
         String extension = originalFilename.substring(dotIndex + 1).toLowerCase();
-        if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            log.warn("不允许上传的文件类型: {}, 支持的类型: pdf, jpg, jpeg, png, gif, webp", extension);
+        if (!fileUploadProperties.isExtensionAllowed(extension)) {
+            log.warn("不允许上传的文件类型: {}, 支持的类型: {}", extension, fileUploadProperties.getAllowedExtensions());
             throw new BadRequestException("不允许上传的文件类型，支持的类型: pdf, jpg, jpeg, png, gif, webp");
         }
 
-        String contentType = file.getContentType();
-        Set<String> allowedMimeTypes = ALLOWED_MIME_TYPES.get(extension);
-        if (allowedMimeTypes != null && contentType != null && !allowedMimeTypes.contains(contentType.toLowerCase())) {
-            log.warn("文件类型与MIME类型不匹配, 扩展名: {}, MIME: {}", extension, contentType);
+        if (!fileUploadProperties.isMimeTypeValid(extension, file.getContentType())) {
+            log.warn("文件类型与MIME类型不匹配, 扩展名: {}, MIME: {}", extension, file.getContentType());
             throw new BadRequestException("文件类型与MIME类型不匹配");
         }
 
-        String uuid = UUID.randomUUID().toString().replace("-", "");
-        String storedFileName = uuid + "." + extension;
+        String storedFileName = UUID.randomUUID().toString().replace("-", "") + "." + extension;
 
-        Path uploadPath = Paths.get(uploadDir);
+        Path uploadPath = Paths.get(fileUploadProperties.getUploadDir());
         if (!Files.exists(uploadPath)) {
             Files.createDirectories(uploadPath);
         }
@@ -152,14 +102,11 @@ public class PrescriptionService extends BaseService {
         Path filePath = uploadPath.resolve(storedFileName);
         Files.copy(file.getInputStream(), filePath);
 
-        String fileUrl = uploadDir + storedFileName;
-
         Prescription prescription = new Prescription();
-        prescription.setFileUrl(fileUrl);
+        prescription.setFileUrl(filePath.toString());
         prescription.setOriginalFilename(originalFilename);
         prescription.setUserId(user.getId());
-        prescription.setDiagnosis(diagnosis);
-        prescription.setDosageInstructions(dosageInstructions);
+        prescription.updateInfo(diagnosis, dosageInstructions);
 
         prescription = prescriptionRepository.save(prescription);
 
@@ -169,17 +116,20 @@ public class PrescriptionService extends BaseService {
 
     /**
      * 分页查询药方历史记录
-     * 按上传时间倒序排列
+     * 按上传时间倒序排列，pageSize 上限 100
      *
      * @param page 页码（从0开始）
      * @param size 每页大小
      * @return 分页药方列表响应
      */
+    @Transactional(readOnly = true)
     public PrescriptionListResponse getPrescriptionHistory(int page, int size) {
         User user = getCurrentUser();
-        log.debug("查询药方列表, 用户ID: {}, 页码: {}, 大小: {}", user.getId(), page, size);
+        int validatedPage = PaginationUtil.validatePage(page);
+        int validatedSize = PaginationUtil.validateSize(size);
+        log.debug("查询药方列表, 用户ID: {}, 页码: {}, 大小: {}", user.getId(), validatedPage, validatedSize);
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "uploadDate"));
+        Pageable pageable = PageRequest.of(validatedPage, validatedSize, Sort.by(Sort.Direction.DESC, "uploadDate"));
         Page<Prescription> prescriptionPage = prescriptionRepository.findByUserId(user.getId(), pageable);
         
         List<PrescriptionResponse> responseList = prescriptionPage.getContent().stream()
@@ -200,25 +150,28 @@ public class PrescriptionService extends BaseService {
      * 同时删除本地存储的文件，校验药方归属权
      *
      * @param prescriptionId 药方ID
-     * @throws IOException 文件删除失败时抛出
      * @throws ResourceNotFoundException 药方不存在或无权限时抛出
      */
     @Transactional
-    public void deletePrescription(Integer prescriptionId) throws IOException {
+    public void deletePrescription(Integer prescriptionId) {
         User user = getCurrentUser();
         log.debug("删除药方, 用户ID: {}, 药方ID: {}", user.getId(), prescriptionId);
 
-        Prescription prescription = prescriptionRepository.findByIdAndUserId(prescriptionId, user.getId());
-        if (prescription == null) {
-            log.warn("药方不存在或无权限删除, 用户ID: {}, 药方ID: {}", user.getId(), prescriptionId);
-            throw new ResourceNotFoundException("药方不存在或无权限删除");
-        }
+        Prescription prescription = prescriptionRepository.findByIdAndUserId(prescriptionId, user.getId())
+                .orElseThrow(() -> {
+                    log.warn("药方不存在或无权限删除, 用户ID: {}, 药方ID: {}", user.getId(), prescriptionId);
+                    return new ResourceNotFoundException("药方不存在或无权限删除");
+                });
 
         // 删除本地文件
         if (prescription.getFileUrl() != null) {
-            Path filePath = Paths.get(prescription.getFileUrl());
-            if (Files.exists(filePath)) {
-                Files.delete(filePath);
+            try {
+                Path filePath = Paths.get(prescription.getFileUrl());
+                if (Files.exists(filePath)) {
+                    Files.delete(filePath);
+                }
+            } catch (IOException e) {
+                log.warn("删除药方文件失败, 药方ID: {}, 文件路径: {}", prescriptionId, prescription.getFileUrl(), e);
             }
         }
 
@@ -241,14 +194,13 @@ public class PrescriptionService extends BaseService {
         User user = getCurrentUser();
         log.debug("更新药方, 用户ID: {}, 药方ID: {}", user.getId(), prescriptionId);
 
-        Prescription prescription = prescriptionRepository.findByIdAndUserId(prescriptionId, user.getId());
-        if (prescription == null) {
-            log.warn("药方不存在或无权限修改, 用户ID: {}, 药方ID: {}", user.getId(), prescriptionId);
-            throw new ResourceNotFoundException("药方不存在或无权限修改");
-        }
+        Prescription prescription = prescriptionRepository.findByIdAndUserId(prescriptionId, user.getId())
+                .orElseThrow(() -> {
+                    log.warn("药方不存在或无权限修改, 用户ID: {}, 药方ID: {}", user.getId(), prescriptionId);
+                    return new ResourceNotFoundException("药方不存在或无权限修改");
+                });
 
-        prescription.setDiagnosis(diagnosis);
-        prescription.setDosageInstructions(dosageInstructions);
+        prescription.updateInfo(diagnosis, dosageInstructions);
 
         prescription = prescriptionRepository.save(prescription);
 

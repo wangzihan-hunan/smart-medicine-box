@@ -1,9 +1,11 @@
 package com.example.medicinebox.repository;
 
+import com.example.medicinebox.constant.FeedbackStatus;
 import com.example.medicinebox.entity.Feedback;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
 /**
@@ -11,7 +13,7 @@ import org.springframework.stereotype.Repository;
  * 提供用户反馈相关的数据库操作方法
  */
 @Repository
-public interface FeedbackRepository extends JpaRepository<Feedback, Integer> {
+public interface FeedbackRepository extends JpaRepository<Feedback, Integer>, JpaSpecificationExecutor<Feedback> {
 
     /**
      * 根据用户ID分页查询反馈（按创建时间降序）
@@ -28,7 +30,7 @@ public interface FeedbackRepository extends JpaRepository<Feedback, Integer> {
      * @param pageable 分页参数
      * @return 分页反馈列表
      */
-    Page<Feedback> findByUserIdAndStatusOrderByCreatedAtDesc(Integer userId, String status, Pageable pageable);
+    Page<Feedback> findByUserIdAndStatusOrderByCreatedAtDesc(Integer userId, FeedbackStatus status, Pageable pageable);
 
     /**
      * 分页查询所有反馈（按创建时间降序）
@@ -43,7 +45,7 @@ public interface FeedbackRepository extends JpaRepository<Feedback, Integer> {
      * @param pageable 分页参数
      * @return 分页反馈列表
      */
-    Page<Feedback> findByStatusOrderByCreatedAtDesc(String status, Pageable pageable);
+    Page<Feedback> findByStatusOrderByCreatedAtDesc(FeedbackStatus status, Pageable pageable);
 
     /**
      * 根据类型分页查询反馈（按创建时间降序）
@@ -58,5 +60,5 @@ public interface FeedbackRepository extends JpaRepository<Feedback, Integer> {
      * @param status 反馈状态
      * @return 反馈数量
      */
-    long countByStatus(String status);
+    long countByStatus(FeedbackStatus status);
 }

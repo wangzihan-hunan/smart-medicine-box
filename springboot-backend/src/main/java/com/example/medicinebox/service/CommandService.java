@@ -7,6 +7,8 @@ import com.example.medicinebox.entity.Command;
 import com.example.medicinebox.entity.User;
 import com.example.medicinebox.exception.ResourceNotFoundException;
 import com.example.medicinebox.repository.CommandRepository;
+import com.example.medicinebox.repository.UserRepository;
+import com.example.medicinebox.util.PaginationUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -34,15 +36,10 @@ public class CommandService extends BaseService {
     private static final Logger log = LoggerFactory.getLogger(CommandService.class);
 
     private final CommandRepository commandRepository;
-    // 时间格式化器
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    /**
-     * 构造函数，注入指令数据访问层
-     *
-     * @param commandRepository 指令数据访问层
-     */
-    public CommandService(CommandRepository commandRepository) {
+    public CommandService(UserRepository userRepository, CommandRepository commandRepository) {
+        super(userRepository);
         this.commandRepository = commandRepository;
     }
 
@@ -65,7 +62,7 @@ public class CommandService extends BaseService {
         command.setAction(request.getAction());
         command.setParams(request.getParams());
         command.setTime(currentTime);
-        command.setStatus("已发送");
+        command.markSent();
         command.setUserId(user.getId());
 
         command = commandRepository.save(command);
@@ -76,17 +73,20 @@ public class CommandService extends BaseService {
 
     /**
      * 分页查询指令历史
-     * 按时间倒序排列
+     * 按时间倒序排列，pageSize 上限 100
      *
      * @param page 页码（从0开始）
      * @param size 每页大小
      * @return 分页指令列表响应
      */
+    @Transactional(readOnly = true)
     public CommandListResponse getCommandHistory(int page, int size) {
         User user = getCurrentUser();
-        log.debug("查询指令列表, 用户ID: {}, 页码: {}, 大小: {}", user.getId(), page, size);
+        int validatedPage = PaginationUtil.validatePage(page);
+        int validatedSize = PaginationUtil.validateSize(size);
+        log.debug("查询指令列表, 用户ID: {}, 页码: {}, 大小: {}", user.getId(), validatedPage, validatedSize);
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "time"));
+        Pageable pageable = PageRequest.of(validatedPage, validatedSize, Sort.by(Sort.Direction.DESC, "time"));
         Page<Command> commandPage = commandRepository.findByUserId(user.getId(), pageable);
         
         List<CommandResponse> responseList = commandPage.getContent().stream()
@@ -121,7 +121,7 @@ public class CommandService extends BaseService {
                     return new ResourceNotFoundException("指令不存在");
                 });
         
-        command.setStatus("已执行");
+        command.markExecuted();
         command = commandRepository.save(command);
         
         log.debug("执行指令成功, 指令ID: {}", command.getId());
@@ -152,7 +152,8 @@ public class CommandService extends BaseService {
 
     /**
      * 获取用户绑定的设备列表（从历史指令聚合）
-     * 返回设备基本信息和指令统计数据
+     *
+     * <p>使用 2 次查询（1次聚合统计 + 1次取最新指令），避免 N+1 查询问题。
      *
      * @return 设备信息列表
      */
@@ -160,25 +161,32 @@ public class CommandService extends BaseService {
         User user = getCurrentUser();
         log.debug("查询设备列表, 用户ID: {}", user.getId());
         
-        List<String> deviceIds = commandRepository.findDistinctDeviceIdsByUserId(user.getId());
-        List<Map<String, Object>> devices = new ArrayList<>();
+        // 查询1：聚合统计（一次查询替代 N 次全量加载）
+        List<Object[]> deviceStats = commandRepository.findDeviceStatsByUserId(user.getId());
         
-        for (String deviceId : deviceIds) {
-            List<Command> commands = commandRepository.findByUserIdAndDeviceId(user.getId(), deviceId);
-            if (commands.isEmpty()) continue;
+        // 查询2：每个设备的最新指令（用于获取 lastAction 和 lastStatus）
+        List<Command> latestCommands = commandRepository.findLatestCommandsPerDevice(user.getId());
+        Map<String, Command> latestCommandMap = new HashMap<>();
+        for (Command cmd : latestCommands) {
+            latestCommandMap.put(cmd.getDeviceId(), cmd);
+        }
+        
+        List<Map<String, Object>> devices = new ArrayList<>();
+        for (Object[] row : deviceStats) {
+            String deviceId = (String) row[0];
+            long totalCommands = ((Number) row[1]).longValue();
+            long executedCommands = row[2] != null ? ((Number) row[2]).longValue() : 0;
+            String lastCommandTime = (String) row[3];
             
             Map<String, Object> device = new HashMap<>();
             device.put("deviceId", deviceId);
-            device.put("totalCommands", commands.size());
-            device.put("lastCommandTime", commands.get(0).getTime());
-            device.put("lastAction", commands.get(0).getAction());
-            device.put("lastStatus", commands.get(0).getStatus());
+            device.put("totalCommands", totalCommands);
+            device.put("executedCommands", executedCommands);
+            device.put("lastCommandTime", lastCommandTime);
             
-            // 统计已执行指令数
-            long executedCount = commands.stream()
-                    .filter(c -> "已执行".equals(c.getStatus()))
-                    .count();
-            device.put("executedCommands", executedCount);
+            Command latest = latestCommandMap.get(deviceId);
+            device.put("lastAction", latest != null ? latest.getAction() : null);
+            device.put("lastStatus", latest != null ? latest.getStatus() : null);
             
             devices.add(device);
         }
@@ -189,7 +197,8 @@ public class CommandService extends BaseService {
 
     /**
      * 获取设备详情（包含最近指令）
-     * 返回设备基本信息、指令统计和最近10条指令
+     *
+     * <p>使用 3 次精准查询（统计 + 最新1条 + 最近10条），内存占用 O(1)。
      *
      * @param deviceId 设备ID
      * @return 设备详情Map
@@ -199,29 +208,38 @@ public class CommandService extends BaseService {
         User user = getCurrentUser();
         log.debug("查询设备详情, 用户ID: {}, 设备ID: {}", user.getId(), deviceId);
         
-        List<Command> commands = commandRepository.findByUserIdAndDeviceId(user.getId(), deviceId);
-        if (commands.isEmpty()) {
+        // 查询1：统计信息（COUNT + SUM，不加载指令实体）
+        List<Object[]> statsResult = commandRepository.findDeviceStats(user.getId(), deviceId);
+        if (statsResult.isEmpty() || statsResult.get(0)[0] == null || ((Number) statsResult.get(0)[0]).longValue() == 0) {
             throw new ResourceNotFoundException("设备不存在或未绑定");
         }
+        Object[] stats = statsResult.get(0);
+        long totalCommands = ((Number) stats[0]).longValue();
+        long executedCommands = stats[1] != null ? ((Number) stats[1]).longValue() : 0;
+        
+        // 查询2：最新一条指令（获取 lastAction、lastStatus、lastCommandTime）
+        List<Command> latestList = commandRepository.findTopByUserIdAndDeviceId(
+                user.getId(), deviceId, PageRequest.of(0, 1));
         
         Map<String, Object> device = new HashMap<>();
         device.put("deviceId", deviceId);
-        device.put("totalCommands", commands.size());
-        device.put("lastCommandTime", commands.get(0).getTime());
-        device.put("lastAction", commands.get(0).getAction());
-        device.put("lastStatus", commands.get(0).getStatus());
+        device.put("totalCommands", totalCommands);
+        device.put("executedCommands", executedCommands);
         
-        long executedCount = commands.stream()
-                .filter(c -> "已执行".equals(c.getStatus()))
-                .count();
-        device.put("executedCommands", executedCount);
+        if (!latestList.isEmpty()) {
+            Command latest = latestList.get(0);
+            device.put("lastCommandTime", latest.getTime());
+            device.put("lastAction", latest.getAction());
+            device.put("lastStatus", latest.getStatus());
+        }
         
-        // 最近10条指令
-        List<CommandResponse> recentCommands = commands.stream()
-                .limit(10)
+        // 查询3：最近10条指令（分页查询，仅加载所需数据）
+        List<Command> recentCommands = commandRepository.findTopByUserIdAndDeviceId(
+                user.getId(), deviceId, PageRequest.of(0, 10));
+        List<CommandResponse> recentList = recentCommands.stream()
                 .map(CommandResponse::fromEntity)
                 .collect(Collectors.toList());
-        device.put("recentCommands", recentCommands);
+        device.put("recentCommands", recentList);
         
         return device;
     }

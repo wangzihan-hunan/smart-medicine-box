@@ -94,37 +94,20 @@ public class RecognitionTestService {
      * @return 统计数据Map
      */
     public Map<String, Object> getBatchStatistics(String batchId) {
-        List<RecognitionTestRecord> records = testRecordRepository.findByBatchId(batchId);
+        List<Object[]> aggregate = testRecordRepository.getBatchAggregateStats(batchId);
+        List<Object[]> typeStats = testRecordRepository.getBatchTypeStats(batchId);
 
-        int total = records.size();
+        int total = 0;
         int successCount = 0;
         long totalTime = 0;
         int totalMedicines = 0;
 
-        // 按图片类型统计总数和成功数
-        Map<String, Integer> typeStats = new HashMap<>();
-        Map<String, Integer> typeSuccess = new HashMap<>();
-
-        for (RecognitionTestRecord record : records) {
-            // 累计成功数
-            if (Boolean.TRUE.equals(record.getSuccess())) {
-                successCount++;
-            }
-            // 累计总耗时
-            if (record.getCostTimeMs() != null) {
-                totalTime += record.getCostTimeMs();
-            }
-            // 累计总药品数
-            if (record.getMedicineCount() != null) {
-                totalMedicines += record.getMedicineCount();
-            }
-
-            // 按图片类型分类统计
-            String type = record.getImageType() != null ? record.getImageType() : "unknown";
-            typeStats.put(type, typeStats.getOrDefault(type, 0) + 1);
-            if (Boolean.TRUE.equals(record.getSuccess())) {
-                typeSuccess.put(type, typeSuccess.getOrDefault(type, 0) + 1);
-            }
+        if (!aggregate.isEmpty()) {
+            Object[] row = aggregate.get(0);
+            total = toInt(row[0]);
+            successCount = toInt(row[1]);
+            totalTime = toLong(row[2]);
+            totalMedicines = toInt(row[3]);
         }
 
         Map<String, Object> result = new HashMap<>();
@@ -132,20 +115,17 @@ public class RecognitionTestService {
         result.put("total", total);
         result.put("successCount", successCount);
         result.put("failureCount", total - successCount);
-        // 计算成功率，保留两位小数
         result.put("successRate", total > 0 ? String.format("%.2f%%", (double) successCount / total * 100) : "0%");
-        // 计算平均耗时
         result.put("avgTimeMs", total > 0 ? totalTime / total : 0);
         result.put("totalMedicines", totalMedicines);
-        // 计算平均每张图片识别的药品数
         result.put("avgMedicines", total > 0 ? String.format("%.2f", (double) totalMedicines / total) : "0");
 
-        // 按图片类型细分的统计数据
         Map<String, Object> typeBreakdown = new HashMap<>();
-        for (String type : typeStats.keySet()) {
+        for (Object[] row : typeStats) {
+            String type = row[0] != null ? row[0].toString() : "unknown";
+            int count = toInt(row[1]);
+            int success = toInt(row[2]);
             Map<String, Object> typeInfo = new HashMap<>();
-            int count = typeStats.get(type);
-            int success = typeSuccess.getOrDefault(type, 0);
             typeInfo.put("total", count);
             typeInfo.put("success", success);
             typeInfo.put("successRate", String.format("%.2f%%", (double) success / count * 100));
@@ -158,18 +138,12 @@ public class RecognitionTestService {
 
     /**
      * 获取所有测试批次ID列表
-     * 去重后按字典序排序返回
+     * 数据库层面去重后按字典序排序返回
      *
      * @return 批次ID列表
      */
     public List<String> getAllBatchIds() {
-        return testRecordRepository.findAll()
-                .stream()
-                .map(RecognitionTestRecord::getBatchId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .sorted()
-                .collect(java.util.stream.Collectors.toList());
+        return testRecordRepository.findDistinctBatchIds();
     }
 
     /**
@@ -192,5 +166,19 @@ public class RecognitionTestService {
         List<RecognitionTestRecord> records = testRecordRepository.findByBatchId(batchId);
         testRecordRepository.deleteAll(records);
         log.info("Cleared {} records for batch {}", records.size(), batchId);
+    }
+
+    private int toInt(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        return 0;
+    }
+
+    private long toLong(Object value) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        return 0L;
     }
 }

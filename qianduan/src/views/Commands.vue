@@ -88,68 +88,124 @@
     <el-dialog 
       title="发送指令" 
       v-model="showAddModal"
-      width="480px"
+      width="520px"
       :close-on-click-modal="false"
     >
-      <!-- 指令表单 -->
-      <form @submit.prevent="handleSubmit" class="command-form">
-        <!-- 指令类型选择 -->
-        <div class="form-group">
-          <label class="form-label">指令类型 *</label>
-          <select class="form-input" v-model="form.action">
-            <option value="OPEN_DOOR">开门</option>
-            <option value="CLOSE_DOOR">关门</option>
-            <option value="DISPENSE_MEDICINE">出药</option>
-            <option value="CHECK_STOCK">检查库存</option>
-            <option value="CALIBRATE">校准</option>
-          </select>
-        </div>
-        <!-- 设备编号输入 -->
-        <div class="form-group">
-          <label class="form-label">设备编号 *</label>
-          <input type="text" class="form-input" v-model="form.deviceId" placeholder="请输入智能药箱设备编号" />
-        </div>
-        <!-- 选择药品（仅出药指令时显示） -->
-        <div class="form-group" v-if="form.action === 'DISPENSE_MEDICINE'">
-          <label class="form-label">选择药品 *</label>
-          <el-select
-            v-model="form.medicineId"
-            placeholder="请选择药品"
-            filterable
-            clearable
-            style="width: 100%"
-            :loading="medicinesLoading"
-            @visible-change="onMedicineSelectVisible"
-          >
-            <el-option
-              v-for="med in medicines"
-              :key="med.id"
-              :label="med.name"
-              :value="med.id"
+      <!-- 输入方式切换标签 -->
+      <div class="input-mode-tabs">
+        <button 
+          class="mode-tab" 
+          :class="{ active: inputMode === 'form' }" 
+          @click="inputMode = 'form'"
+        >
+          <el-icon><Edit /></el-icon> 手动输入
+        </button>
+        <button 
+          class="mode-tab" 
+          :class="{ active: inputMode === 'voice' }" 
+          @click="inputMode = 'voice'"
+        >
+          <el-icon><Microphone /></el-icon> 语音输入
+        </button>
+      </div>
+
+      <!-- 手动输入模式 -->
+      <div v-show="inputMode === 'form'">
+        <form @submit.prevent="handleSubmit" class="command-form">
+          <!-- 指令类型选择 -->
+          <div class="form-group">
+            <label class="form-label">指令类型 *</label>
+            <select class="form-input" v-model="form.action">
+              <option value="OPEN_DOOR">开门</option>
+              <option value="CLOSE_DOOR">关门</option>
+              <option value="DISPENSE_MEDICINE">出药</option>
+              <option value="CHECK_STOCK">检查库存</option>
+              <option value="BEEP">找药盒（蜂鸣）</option>
+              <option value="CALIBRATE">校准</option>
+            </select>
+          </div>
+          <!-- 设备选择 -->
+          <div class="form-group">
+            <label class="form-label">目标设备 *</label>
+            <el-select
+              v-model="form.deviceId"
+              placeholder="请选择设备"
+              filterable
+              style="width: 100%"
+              :loading="devicesLoading"
+              @visible-change="onDeviceSelectVisible"
             >
-              <div class="medicine-option">
-                <div class="medicine-option-info">
-                  <span class="medicine-option-name">{{ med.name }}</span>
-                  <span class="medicine-option-spec" v-if="med.spec">{{ med.spec }}</span>
+              <el-option
+                v-for="dev in devices"
+                :key="dev.id"
+                :label="dev.name || dev.deviceId || dev.id"
+                :value="dev.deviceId || dev.id"
+              >
+                <div class="device-option">
+                  <span class="device-option-name">{{ dev.name || dev.deviceId || dev.id }}</span>
+                  <span class="device-option-status" :class="dev.online ? 'online' : 'offline'">
+                    {{ dev.online ? '在线' : '离线' }}
+                  </span>
                 </div>
-                <span class="medicine-option-stock" :class="{ 'low-stock': med.isLowStock }">
-                  库存: {{ med.stock }}
-                </span>
-              </div>
-            </el-option>
-          </el-select>
-        </div>
-        <!-- 参数输入 -->
-        <div class="form-group">
-          <label class="form-label">参数</label>
-          <textarea class="form-input" v-model="form.params" placeholder="请输入指令参数" rows="3"></textarea>
-        </div>
-      </form>
-      
-      <!-- 弹窗底部按钮 -->
+              </el-option>
+            </el-select>
+          </div>
+          <!-- 选择药品（仅出药指令时显示） -->
+          <div class="form-group" v-if="form.action === 'DISPENSE_MEDICINE'">
+            <label class="form-label">选择药品 *</label>
+            <el-select
+              v-model="form.medicineId"
+              placeholder="请选择药品"
+              filterable
+              clearable
+              style="width: 100%"
+              :loading="medicinesLoading"
+              @visible-change="onMedicineSelectVisible"
+            >
+              <el-option
+                v-for="med in medicines"
+                :key="med.id"
+                :label="med.name"
+                :value="med.id"
+              >
+                <div class="medicine-option">
+                  <div class="medicine-option-info">
+                    <span class="medicine-option-name">{{ med.name }}</span>
+                    <span class="medicine-option-spec" v-if="med.spec">{{ med.spec }}</span>
+                  </div>
+                  <span class="medicine-option-stock" :class="{ 'low-stock': med.isLowStock }">
+                    库存: {{ med.stock }}
+                  </span>
+                </div>
+              </el-option>
+            </el-select>
+          </div>
+          <!-- 指令预览（自动生成参数） -->
+          <div v-if="commandPreview" class="form-group">
+            <label class="form-label">指令预览</label>
+            <div class="command-preview-card">
+              <span class="preview-action">{{ commandPreview.label }}</span>
+              <span v-if="commandPreview.deviceName" class="preview-arrow">→</span>
+              <span v-if="commandPreview.deviceName" class="preview-device">{{ commandPreview.deviceName }}</span>
+              <span v-if="commandPreview.medicineName" class="preview-arrow">→</span>
+              <span v-if="commandPreview.medicineName" class="preview-medicine">{{ commandPreview.medicineName }}</span>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <!-- 语音输入模式 -->
+      <div v-show="inputMode === 'voice'">
+        <VoiceCommandButton
+          :medicines="medicines"
+          @send="handleVoiceSend"
+        />
+      </div>
+
+      <!-- 弹窗底部按钮（仅手动模式显示） -->
       <template #footer>
         <button class="btn-secondary" @click="closeModal">取消</button>
-        <button class="btn-primary" @click="handleSubmit">发送</button>
+        <button v-if="inputMode === 'form'" class="btn-primary" @click="handleSubmit">发送</button>
       </template>
     </el-dialog>
   </div>
@@ -157,13 +213,15 @@
 
 <script setup>
 // 引入Vue组合式API
-import { ref, reactive, onMounted, onActivated, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, watch } from 'vue'
 // 引入Element Plus消息提示组件
 import { ElMessage, ElMessageBox } from 'element-plus'
 // 引入API接口
 import { commandAPI, medicineAPI } from '../utils/api'
 // 引入图标组件
-import { ArrowRight, Cellphone, VideoPlay, Delete, ArrowRight as DoorOpen, ArrowLeft as DoorClose, TakeawayBox, Box, Setting } from '@element-plus/icons-vue'
+import { ArrowRight, Cellphone, VideoPlay, Delete, Edit, Microphone, ArrowRight as DoorOpen, ArrowLeft as DoorClose, TakeawayBox, Box, Setting } from '@element-plus/icons-vue'
+// 引入语音指令组件
+import VoiceCommandButton from '../components/VoiceCommandButton.vue'
 // 引入日期处理库
 import dayjs from 'dayjs'
 
@@ -171,6 +229,8 @@ import dayjs from 'dayjs'
 const loading = ref(false)
 // 控制发送指令弹窗显示
 const showAddModal = ref(false)
+// 输入模式：form（手动输入）或 voice（语音输入）
+const inputMode = ref('form')
 // 指令列表数据
 const commands = ref([])
 // 当前页码（从0开始）
@@ -183,19 +243,42 @@ const total = ref(0)
 const medicines = ref([])
 // 药品列表加载状态
 const medicinesLoading = ref(false)
+// 设备列表数据
+const devices = ref([])
+// 设备列表加载状态
+const devicesLoading = ref(false)
 
 // 表单响应式数据
 const form = reactive({
   action: 'OPEN_DOOR',  // 指令类型，默认为开门
-  deviceId: '',         // 设备编号
-  medicineId: '',       // 药品ID（出药指令时需要）
-  params: ''            // 指令参数
+  deviceId: '',         // 设备ID
+  medicineId: ''        // 药品ID（出药指令时需要）
 })
 
 // 监听指令类型变化，切换为出药指令时自动加载药品列表
 watch(() => form.action, (newAction) => {
   if (newAction === 'DISPENSE_MEDICINE' && medicines.value.length === 0) {
     fetchMedicines()
+  }
+})
+
+// 指令预览：根据已选选项自动生成
+const commandPreview = computed(() => {
+  if (!form.action) return null
+  const actionLabels = {
+    'OPEN_DOOR': '开门',
+    'CLOSE_DOOR': '关门',
+    'DISPENSE_MEDICINE': '出药',
+    'CHECK_STOCK': '检查库存',
+    'BEEP': '找药盒（蜂鸣）',
+    'CALIBRATE': '校准'
+  }
+  const device = devices.value.find(d => (d.deviceId || d.id) === form.deviceId)
+  const medicine = medicines.value.find(m => m.id == form.medicineId)
+  return {
+    label: actionLabels[form.action] || form.action,
+    deviceName: device ? (device.name || device.deviceId || device.id) : (form.deviceId || null),
+    medicineName: medicine ? medicine.name : null
   }
 })
 
@@ -233,6 +316,26 @@ async function fetchMedicines() {
 function onMedicineSelectVisible(visible) {
   if (visible && medicines.value.length === 0) {
     fetchMedicines()
+  }
+}
+
+// 获取设备列表
+async function fetchDevices() {
+  devicesLoading.value = true
+  try {
+    const response = await commandAPI.getDevices()
+    devices.value = Array.isArray(response) ? response : (response.list || [])
+  } catch (error) {
+    console.error('获取设备列表失败:', error)
+  } finally {
+    devicesLoading.value = false
+  }
+}
+
+// 设备下拉框显示时触发
+function onDeviceSelectVisible(visible) {
+  if (visible && devices.value.length === 0) {
+    fetchDevices()
   }
 }
 
@@ -284,17 +387,40 @@ function deleteCommand(id) {
 // 关闭弹窗并重置表单
 function closeModal() {
   showAddModal.value = false
+  inputMode.value = 'form'
   form.action = 'OPEN_DOOR'
   form.deviceId = ''
   form.medicineId = ''
-  form.params = ''
+}
+
+// 语音指令发送处理
+async function handleVoiceSend(voiceCommand) {
+  loading.value = true
+  try {
+    const data = {
+      action: voiceCommand.action,
+      deviceId: form.deviceId || 'default',
+      params: buildParams(voiceCommand.action, voiceCommand.medicineName)
+    }
+    if (voiceCommand.medicineId) {
+      data.medicineId = voiceCommand.medicineId
+    }
+    await commandAPI.create(data)
+    ElMessage.success('指令发送成功')
+    closeModal()
+    fetchCommands()
+  } catch (error) {
+    ElMessage.error('发送失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 // 提交表单：发送新指令
 async function handleSubmit() {
-  // 表单校验：设备编号必填
+  // 表单校验：设备必选
   if (!form.deviceId) {
-    ElMessage.warning('请输入设备编号')
+    ElMessage.warning('请选择目标设备')
     return
   }
   // 表单校验：出药指令必须选择药品
@@ -306,13 +432,12 @@ async function handleSubmit() {
   loading.value = true
   
   try {
-    // 构造提交数据
+    const medicine = medicines.value.find(m => m.id == form.medicineId)
     const data = {
       action: form.action,
       deviceId: form.deviceId,
-      params: form.params
+      params: buildParams(form.action, medicine ? medicine.name : null)
     }
-    // 出药指令时添加药品ID
     if (form.medicineId) {
       data.medicineId = parseInt(form.medicineId)
     }
@@ -325,6 +450,28 @@ async function handleSubmit() {
     ElMessage.error('发送失败')
   } finally {
     loading.value = false
+  }
+}
+
+/**
+ * 根据指令类型和选项自动生成参数字符串
+ */
+function buildParams(action, medicineName) {
+  switch (action) {
+    case 'DISPENSE_MEDICINE':
+      return medicineName ? `出药: ${medicineName}` : '出药'
+    case 'OPEN_DOOR':
+      return '开门'
+    case 'CLOSE_DOOR':
+      return '关门'
+    case 'CHECK_STOCK':
+      return '检查库存'
+    case 'BEEP':
+      return '蜂鸣寻盒'
+    case 'CALIBRATE':
+      return '校准'
+    default:
+      return ''
   }
 }
 
@@ -680,5 +827,111 @@ onActivated(() => {
 /* 低库存警告样式 */
 .medicine-option-stock.low-stock {
   color: var(--danger-color);
+}
+
+/* 设备选择器下拉选项样式 */
+.device-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.device-option-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.device-option-status {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.device-option-status.online {
+  color: #16a34a;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.device-option-status.offline {
+  color: #9ca3af;
+  background: rgba(156, 163, 175, 0.1);
+}
+
+/* 指令预览卡片 */
+.command-preview-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #ecfdf5;
+  border: 1px solid #86efac;
+  border-radius: 10px;
+  font-size: 14px;
+  flex-wrap: wrap;
+}
+
+.preview-action {
+  font-weight: 700;
+  color: #059669;
+  padding: 2px 10px;
+  background: rgba(16, 185, 129, 0.1);
+  border-radius: 6px;
+}
+
+.preview-arrow {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.preview-device {
+  color: #374151;
+  font-weight: 500;
+}
+
+.preview-medicine {
+  color: #1d4ed8;
+  font-weight: 500;
+  padding: 2px 10px;
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 6px;
+}
+
+/* 输入模式切换标签 */
+.input-mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  padding: 4px;
+  background: #f3f4f6;
+  border-radius: 12px;
+}
+
+.mode-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-tab:hover {
+  color: #374151;
+}
+
+.mode-tab.active {
+  background: white;
+  color: #10b981;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 </style>

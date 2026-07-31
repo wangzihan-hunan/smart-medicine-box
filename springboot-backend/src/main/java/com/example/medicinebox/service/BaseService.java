@@ -3,7 +3,6 @@ package com.example.medicinebox.service;
 import com.example.medicinebox.entity.User;
 import com.example.medicinebox.exception.ResourceNotFoundException;
 import com.example.medicinebox.repository.UserRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 
@@ -13,9 +12,11 @@ import org.springframework.security.core.userdetails.UserDetails;
  */
 public abstract class BaseService {
 
-    // 用户数据访问层，子类可直接访问
-    @Autowired
-    protected UserRepository userRepository;
+    protected final UserRepository userRepository;
+
+    public BaseService(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
 
     /**
      * 获取当前登录用户

@@ -8,8 +8,12 @@ import com.example.medicinebox.entity.User;
 import com.example.medicinebox.exception.ResourceNotFoundException;
 import com.example.medicinebox.repository.ReminderRepository;
 import com.example.medicinebox.repository.UserRepository;
+import com.example.medicinebox.strategy.RepeatStrategyFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.BeanUtils;
+import org.springframework.beans.BeanWrapper;
+import org.springframework.beans.BeanWrapperImpl;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -18,10 +22,15 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.beans.PropertyDescriptor;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 /**
@@ -33,18 +42,27 @@ public class ReminderService extends BaseService {
 
     private static final Logger log = LoggerFactory.getLogger(ReminderService.class);
 
+    /** 定时任务每批处理数量上限 */
+    private static final int TRIGGER_BATCH_SIZE = 100;
+
+    /** JVM级别并发锁，防止同一实例内定时任务重复执行 */
+    private final ReentrantLock triggerLock = new ReentrantLock();
+
     private final ReminderRepository reminderRepository;
-    private final UserRepository userRepository;
+    private final RepeatStrategyFactory repeatStrategyFactory;
 
     /**
      * 构造函数，注入依赖
      *
      * @param reminderRepository 提醒数据访问层
      * @param userRepository 用户数据访问层
+     * @param repeatStrategyFactory 重复策略工厂
      */
-    public ReminderService(ReminderRepository reminderRepository, UserRepository userRepository) {
+    public ReminderService(ReminderRepository reminderRepository, UserRepository userRepository,
+                           RepeatStrategyFactory repeatStrategyFactory) {
+        super(userRepository);
         this.reminderRepository = reminderRepository;
-        this.userRepository = userRepository;
+        this.repeatStrategyFactory = repeatStrategyFactory;
     }
 
     /**
@@ -60,21 +78,7 @@ public class ReminderService extends BaseService {
         log.debug("添加提醒, 用户ID: {}, 药品名称: {}, 时间: {}", user.getId(), request.getMedicineName(), request.getTime());
 
         Reminder reminder = new Reminder();
-        reminder.setMedicineId(request.getMedicineId());
-        reminder.setMedicineName(request.getMedicineName());
-        reminder.setPrescriptionId(request.getPrescriptionId());
-        reminder.setTime(request.getTime());
-        reminder.setDosage(request.getDosage());
-        reminder.setFrequency(request.getFrequency());
-        reminder.setIsRepeat(request.getIsRepeat());
-        reminder.setRemark(request.getRemark());
-        reminder.setStartDate(request.getStartDate());
-        reminder.setEndDate(request.getEndDate());
-        reminder.setRepeatEndType(request.getRepeatEndType());
-        reminder.setRepeatEndDate(request.getRepeatEndDate());
-        reminder.setRepeatCount(request.getRepeatCount());
-        reminder.setAdvanceNotice(request.getAdvanceNotice());
-        reminder.setSoundEffect(request.getSoundEffect());
+        BeanUtils.copyProperties(request, reminder);
         reminder.setUserId(user.getId());
 
         reminder = reminderRepository.save(reminder);
@@ -131,7 +135,7 @@ public class ReminderService extends BaseService {
                     return new ResourceNotFoundException("提醒不存在");
                 });
         
-        reminder.setTaken(true);
+        reminder.markTaken();
         reminder = reminderRepository.save(reminder);
         
         log.debug("标记已服用成功, 提醒ID: {}", reminder.getId());
@@ -158,52 +162,8 @@ public class ReminderService extends BaseService {
                     return new ResourceNotFoundException("提醒不存在");
                 });
         
-        // 逐个字段非空判断，仅更新有值的字段
-        if (request.getMedicineId() != null) {
-            reminder.setMedicineId(request.getMedicineId());
-        }
-        if (request.getMedicineName() != null) {
-            reminder.setMedicineName(request.getMedicineName());
-        }
-        if (request.getPrescriptionId() != null) {
-            reminder.setPrescriptionId(request.getPrescriptionId());
-        }
-        if (request.getTime() != null) {
-            reminder.setTime(request.getTime());
-        }
-        if (request.getDosage() != null) {
-            reminder.setDosage(request.getDosage());
-        }
-        if (request.getFrequency() != null) {
-            reminder.setFrequency(request.getFrequency());
-        }
-        if (request.getIsRepeat() != null) {
-            reminder.setIsRepeat(request.getIsRepeat());
-        }
-        if (request.getRemark() != null) {
-            reminder.setRemark(request.getRemark());
-        }
-        if (request.getStartDate() != null) {
-            reminder.setStartDate(request.getStartDate());
-        }
-        if (request.getEndDate() != null) {
-            reminder.setEndDate(request.getEndDate());
-        }
-        if (request.getRepeatEndType() != null) {
-            reminder.setRepeatEndType(request.getRepeatEndType());
-        }
-        if (request.getRepeatEndDate() != null) {
-            reminder.setRepeatEndDate(request.getRepeatEndDate());
-        }
-        if (request.getRepeatCount() != null) {
-            reminder.setRepeatCount(request.getRepeatCount());
-        }
-        if (request.getAdvanceNotice() != null) {
-            reminder.setAdvanceNotice(request.getAdvanceNotice());
-        }
-        if (request.getSoundEffect() != null) {
-            reminder.setSoundEffect(request.getSoundEffect());
-        }
+        // 只复制非空字段，保持原有字段值不变
+        BeanUtils.copyProperties(request, reminder, getNullPropertyNames(request));
 
         reminder = reminderRepository.save(reminder);
         log.debug("更新提醒成功, 提醒ID: {}", reminder.getId());
@@ -236,50 +196,94 @@ public class ReminderService extends BaseService {
      * 定时检查待触发的用药提醒 - 每分钟执行
      * 触发条件：提醒时间等于当前时间（HH:mm），且未服用，且在有效日期范围内
      * 非重复提醒触发后自动标记为已完成
+     * 使用分页查询避免大数据量内存溢出，使用 ReentrantLock 防止并发执行
      */
     @Scheduled(cron = "0 * * * * *")
     public void triggerReminders() {
-        LocalTime now = LocalTime.now().withSecond(0).withNano(0);
-        String currentTime = now.format(DateTimeFormatter.ofPattern("HH:mm"));
-        LocalDate today = LocalDate.now();
-        
-        log.debug("检查用药提醒, 当前时间: {}", currentTime);
-        
-        List<Reminder> reminders = reminderRepository.findAll();
-        int triggered = 0;
-        
-        for (Reminder reminder : reminders) {
-            if (Boolean.TRUE.equals(reminder.getTaken())) {
-                continue;
-            }
-            if (reminder.getTime() == null || !reminder.getTime().equals(currentTime)) {
-                continue;
-            }
-            // 检查日期范围
-            if (reminder.getStartDate() != null && today.isBefore(reminder.getStartDate())) {
-                continue;
-            }
-            if (reminder.getEndDate() != null && today.isAfter(reminder.getEndDate())) {
-                continue;
+        if (!triggerLock.tryLock()) {
+            log.debug("上一次定时任务尚未完成，跳过本次触发");
+            return;
+        }
+        try {
+            LocalTime now = LocalTime.now().withSecond(0).withNano(0);
+            String currentTime = now.format(DateTimeFormatter.ofPattern("HH:mm"));
+            LocalDate today = LocalDate.now();
+            
+            log.debug("检查用药提醒, 当前时间: {}", currentTime);
+            
+            int page = 0;
+            boolean hasMore = true;
+            int triggered = 0;
+            
+            while (hasMore) {
+                Pageable pageable = PageRequest.of(page, TRIGGER_BATCH_SIZE);
+                Page<Reminder> reminderPage = reminderRepository
+                        .findByTimeAndIsActiveTrueAndTakenFalseAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
+                                currentTime, today, today, pageable);
+                
+                if (reminderPage.isEmpty()) {
+                    hasMore = false;
+                    continue;
+                }
+                
+                for (Reminder reminder : reminderPage.getContent()) {
+                    // 处理重复提醒结束条件（领域逻辑在实体中）
+                    if (reminder.shouldStopRepeat()) {
+                        reminderRepository.save(reminder);
+                        continue;
+                    }
+                    
+                    User user = userRepository.findById(reminder.getUserId()).orElse(null);
+                    if (user != null) {
+                        log.info("触发用药提醒: 用户={}, 药品={}, 时间={}, 剂量={}",
+                                user.getPhone(), reminder.getMedicineName(), reminder.getTime(), reminder.getDosage());
+                        triggered++;
+                        
+                        if (!Boolean.TRUE.equals(reminder.getIsRepeat())) {
+                            // 非重复提醒触发后自动标记为已完成
+                            reminder.markTaken();
+                            reminderRepository.save(reminder);
+                        } else {
+                            // 重复提醒：根据频率策略计算下次提醒时间
+                            reminder.setNextRemindTime(
+                                    repeatStrategyFactory.calculateNext(
+                                            reminder.getFrequency(), reminder.getNextRemindTime()));
+                            reminderRepository.save(reminder);
+                        }
+                    }
+                }
+                
+                page++;
+                hasMore = reminderPage.hasNext();
             }
             
-            // 触发提醒（记录日志，实际推送由通知服务处理）
-            User user = userRepository.findById(reminder.getUserId()).orElse(null);
-            if (user != null) {
-                log.info("触发用药提醒: 用户={}, 药品={}, 时间={}, 剂量={}",
-                        user.getPhone(), reminder.getMedicineName(), reminder.getTime(), reminder.getDosage());
-                triggered++;
-                
-                // 非重复提醒触发后自动标记为已完成
-                if (!Boolean.TRUE.equals(reminder.getIsRepeat())) {
-                    reminder.setTaken(true);
-                    reminderRepository.save(reminder);
-                }
+            if (triggered > 0) {
+                log.info("用药提醒触发完成, 共触发 {} 条提醒", triggered);
+            }
+        } catch (Exception e) {
+            log.error("定时提醒任务执行异常", e);
+        } finally {
+            triggerLock.unlock();
+        }
+    }
+
+    /**
+     * 获取对象中值为 null 的属性名数组
+     * 用于 BeanUtils.copyProperties 时跳过 null 字段
+     *
+     * @param source 源对象
+     * @return null 属性名数组
+     */
+    private static String[] getNullPropertyNames(Object source) {
+        final BeanWrapper src = new BeanWrapperImpl(source);
+        PropertyDescriptor[] pds = src.getPropertyDescriptors();
+        Set<String> emptyNames = new HashSet<>();
+        for (PropertyDescriptor pd : pds) {
+            Object srcValue = src.getPropertyValue(pd.getName());
+            if (srcValue == null) {
+                emptyNames.add(pd.getName());
             }
         }
-        
-        if (triggered > 0) {
-            log.info("用药提醒触发完成, 共触发 {} 条提醒", triggered);
-        }
+        return emptyNames.toArray(new String[0]);
     }
 }

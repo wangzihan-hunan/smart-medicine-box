@@ -1,5 +1,7 @@
 package com.example.medicinebox.entity;
 
+import com.example.medicinebox.constant.AlertStatus;
+
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
@@ -55,8 +57,9 @@ public class AlertRecord {
     private String thresholdValue;
 
     // 告警状态：PENDING(待处理)、RESOLVED(已解决)、IGNORED(已忽略)
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private String status = "PENDING";
+    private AlertStatus status = AlertStatus.PENDING;
 
     // 处理人
     @Column(name = "handled_by", length = 50)
@@ -74,4 +77,32 @@ public class AlertRecord {
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
+
+    // ==================== 领域方法 ====================
+
+    /** 处理告警：标记为已解决 */
+    public void resolve(String handledBy, String remark) {
+        this.status = AlertStatus.RESOLVED;
+        this.handledBy = handledBy;
+        this.handledAt = LocalDateTime.now();
+        this.handleRemark = remark;
+    }
+
+    /** 忽略告警 */
+    public void ignore(String handledBy, String remark) {
+        this.status = AlertStatus.IGNORED;
+        this.handledBy = handledBy;
+        this.handledAt = LocalDateTime.now();
+        this.handleRemark = remark;
+    }
+
+    /** 告警是否待处理 */
+    public boolean isPending() {
+        return AlertStatus.PENDING == status;
+    }
+
+    /** 告警是否已处理 */
+    public boolean isResolved() {
+        return AlertStatus.RESOLVED == status;
+    }
 }

@@ -10,7 +10,10 @@ import com.example.medicinebox.dto.response.LoginResponse;
 import com.example.medicinebox.dto.response.RegisterResponse;
 import com.example.medicinebox.dto.response.UserInfoResponse;
 import com.example.medicinebox.dto.response.UserListResponse;
+import com.example.medicinebox.service.AdminUserService;
 import com.example.medicinebox.service.AuthService;
+import com.example.medicinebox.service.SmsCaptchaService;
+import com.example.medicinebox.util.PaginationUtil;
 import org.springframework.security.access.prepost.PreAuthorize;
 import javax.validation.Valid;
 import org.slf4j.Logger;
@@ -29,9 +32,14 @@ public class AuthController {
     private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final AuthService authService;
+    private final AdminUserService adminUserService;
+    private final SmsCaptchaService smsCaptchaService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, AdminUserService adminUserService,
+                          SmsCaptchaService smsCaptchaService) {
         this.authService = authService;
+        this.adminUserService = adminUserService;
+        this.smsCaptchaService = smsCaptchaService;
     }
 
     /**
@@ -113,17 +121,23 @@ public class AuthController {
     }
 
     /**
-     * 获取所有用户列表接口
+     * 获取所有用户列表接口（分页）
      * HTTP方法：GET
      * 权限要求：管理员角色（ADMIN）
      * 
+     * @param page 页码，默认0
+     * @param size 每页大小，默认20，最大100
      * @return 用户列表响应，包含用户总数和用户信息列表
      */
     @GetMapping("/users")
     @PreAuthorize("hasRole('ADMIN')")
-    public BaseResponse<UserListResponse> getAllUsers() {
-        log.info("获取用户列表");
-        UserListResponse response = authService.getAllUsers();
+    public BaseResponse<UserListResponse> getAllUsers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        int validatedPage = PaginationUtil.validatePage(page);
+        int validatedSize = PaginationUtil.validateSize(size);
+        log.info("获取用户列表, page: {}, size: {}", validatedPage, validatedSize);
+        UserListResponse response = adminUserService.getAllUsers(validatedPage, validatedSize);
         log.info("获取用户列表成功, 数量: {}", response.getTotalElements());
         return BaseResponse.success("获取用户列表成功！", response);
     }
@@ -139,7 +153,7 @@ public class AuthController {
     @PostMapping("/send-captcha")
     public BaseResponse<Void> sendCaptcha(@Valid @RequestBody CaptchaRequest request) {
         log.info("发送验证码请求, 手机号: {}", request.getPhone());
-        authService.sendCaptcha(request.getPhone());
+        smsCaptchaService.sendCaptcha(request.getPhone());
         log.info("验证码发送成功, 手机号: {}", request.getPhone());
         return BaseResponse.success("验证码已发送，请注意查收短信！");
     }
@@ -155,7 +169,7 @@ public class AuthController {
     @PutMapping("/reset-password")
     public BaseResponse<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         log.info("重置密码请求, 手机号: {}", request.getPhone());
-        authService.resetPassword(request.getPhone(), request.getCaptcha(), request.getNewPassword());
+        smsCaptchaService.resetPassword(request.getPhone(), request.getCaptcha(), request.getNewPassword());
         log.info("密码重置成功, 手机号: {}", request.getPhone());
         return BaseResponse.success("密码重置成功，请使用新密码登录！");
     }

@@ -5,7 +5,6 @@ import com.example.medicinebox.repository.ReminderRepository;
 import com.example.medicinebox.service.NotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,10 +18,11 @@ import java.util.List;
  * 用药提醒定时任务调度器
  *
  * <p>负责扫描即将到期的用药提醒，并通过通知服务发送推送。
+ * 提醒频率计算逻辑与 {@code com.example.medicinebox.strategy.RepeatStrategy} 策略模式保持一致。
  * 支持以下特性：
  * <ul>
  *   <li>基于 nextRemindTime 字段的精确扫描</li>
- *   <li>按频率（每日/每周/每月）动态计算下一次提醒时间</li>
+ *   <li>按频率（每日/每周/每月）计算下一次提醒时间</li>
  *   <li>支持结束条件：永不结束、结束于指定日期、重复N次</li>
  *   <li>支持提前通知时间（advanceNotice）</li>
  * </ul>
@@ -32,11 +32,13 @@ public class ReminderScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(ReminderScheduler.class);
 
-    @Autowired
-    private ReminderRepository reminderRepository;
+    private final ReminderRepository reminderRepository;
+    private final NotificationService notificationService;
 
-    @Autowired
-    private NotificationService notificationService;
+    public ReminderScheduler(ReminderRepository reminderRepository, NotificationService notificationService) {
+        this.reminderRepository = reminderRepository;
+        this.notificationService = notificationService;
+    }
 
     /**
      * 每30秒扫描一次到期提醒
@@ -156,7 +158,8 @@ public class ReminderScheduler {
     /**
      * 根据提醒频率计算下一次提醒时间
      *
-     * <p>支持的频率格式：
+     * <p>与 {@code com.example.medicinebox.strategy.RepeatStrategy} 策略模式逻辑一致。
+     * 支持的频率格式：
      * <ul>
      *   <li>每日一次/每日两次/每日三次 -> 加1天</li>
      *   <li>每周一次/每周两次 -> 加7天</li>

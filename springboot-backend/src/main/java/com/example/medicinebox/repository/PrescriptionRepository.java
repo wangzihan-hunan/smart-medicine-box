@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 处方数据访问接口
@@ -26,9 +27,9 @@ public interface PrescriptionRepository extends JpaRepository<Prescription, Inte
      * 根据处方ID和用户ID查询处方
      * @param id 处方ID
      * @param userId 用户ID
-     * @return 处方对象
+     * @return 处方对象（Optional）
      */
-    Prescription findByIdAndUserId(Integer id, Integer userId);
+    Optional<Prescription> findByIdAndUserId(Integer id, Integer userId);
 
     /**
      * 根据用户ID分页查询处方

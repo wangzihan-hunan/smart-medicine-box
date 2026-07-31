@@ -1,5 +1,10 @@
 package com.example.medicinebox.entity;
 
+import com.example.medicinebox.constant.FeedbackStatus;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import javax.persistence.*;
 import java.time.LocalDateTime;
 
@@ -10,6 +15,9 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "feedbacks")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class Feedback {
 
     // 反馈唯一标识，主键自增
@@ -38,8 +46,9 @@ public class Feedback {
     private String contact;
 
     // 处理状态：PENDING(待处理)、PROCESSING(处理中)、RESOLVED(已解决)、CLOSED(已关闭)等
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20, nullable = false)
-    private String status = "PENDING";
+    private FeedbackStatus status = FeedbackStatus.PENDING;
 
     // 管理员回复内容
     @Column(name = "reply", columnDefinition = "TEXT")
@@ -62,7 +71,7 @@ public class Feedback {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
-        if (status == null) status = "PENDING";
+        if (status == null) status = FeedbackStatus.PENDING;
     }
 
     // 实体更新前自动设置更新时间
@@ -71,94 +80,20 @@ public class Feedback {
         updatedAt = LocalDateTime.now();
     }
 
-    public Feedback() {
+    // ==================== 领域方法 ====================
+
+    /** 管理员回复反馈 */
+    public void reply(String replyContent) {
+        this.reply = replyContent;
+        this.status = FeedbackStatus.REPLIED;
+        this.repliedAt = LocalDateTime.now();
     }
 
-    public Integer getId() {
-        return id;
-    }
-
-    public void setId(Integer id) {
-        this.id = id;
-    }
-
-    public Integer getUserId() {
-        return userId;
-    }
-
-    public void setUserId(Integer userId) {
-        this.userId = userId;
-    }
-
-    public String getType() {
-        return type;
-    }
-
-    public void setType(String type) {
-        this.type = type;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public void setTitle(String title) {
-        this.title = title;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public void setContent(String content) {
-        this.content = content;
-    }
-
-    public String getContact() {
-        return contact;
-    }
-
-    public void setContact(String contact) {
-        this.contact = contact;
-    }
-
-    public String getStatus() {
-        return status;
-    }
-
-    public void setStatus(String status) {
-        this.status = status;
-    }
-
-    public String getReply() {
-        return reply;
-    }
-
-    public void setReply(String reply) {
-        this.reply = reply;
-    }
-
-    public LocalDateTime getRepliedAt() {
-        return repliedAt;
-    }
-
-    public void setRepliedAt(LocalDateTime repliedAt) {
-        this.repliedAt = repliedAt;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
+    /** 更新处理状态，若状态为已回复且未设置回复时间则自动补全 */
+    public void advanceStatus(FeedbackStatus newStatus) {
+        this.status = newStatus;
+        if (FeedbackStatus.REPLIED == newStatus && this.repliedAt == null) {
+            this.repliedAt = LocalDateTime.now();
+        }
     }
 }

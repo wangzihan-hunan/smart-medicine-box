@@ -1,21 +1,23 @@
 package com.example.medicinebox.repository;
 
+import com.example.medicinebox.constant.UserRole;
+import com.example.medicinebox.constant.UserStatus;
 import com.example.medicinebox.entity.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 @DataJpaTest
+@ActiveProfiles("test")
 @DisplayName("UserRepository 集成测试")
-@Disabled("集成测试需要数据库环境,暂时禁用")
 class UserRepositoryTest {
 
     @Autowired
@@ -32,8 +34,8 @@ class UserRepositoryTest {
         testUser.setPhone("13800138000");
         testUser.setPassword("encodedPassword");
         testUser.setName("张三");
-        testUser.setRole("USER");
-        testUser.setStatus("ACTIVE");
+        testUser.setRole(UserRole.USER);
+        testUser.setStatus(UserStatus.ACTIVE);
         testUser.setPhoneVerified(false);
         testUser.setLoginAttempts(0);
     }
@@ -47,7 +49,7 @@ class UserRepositoryTest {
 
         assertTrue(found.isPresent());
         assertEquals("张三", found.get().getName());
-        assertEquals("USER", found.get().getRole());
+        assertEquals(UserRole.USER, found.get().getRole());
     }
 
     @Test
@@ -83,7 +85,7 @@ class UserRepositoryTest {
 
         assertNotNull(saved.getId());
         assertEquals("13800138000", saved.getPhone());
-        assertEquals("ACTIVE", saved.getStatus());
+        assertEquals(UserStatus.ACTIVE, saved.getStatus());
         assertNotNull(saved.getCreatedAt());
         assertNotNull(saved.getUpdatedAt());
     }

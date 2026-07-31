@@ -11,3 +11,5 @@ target/
 *.war
 .mvn/
 build/
+uploads/
+.brooks-lint-history.json

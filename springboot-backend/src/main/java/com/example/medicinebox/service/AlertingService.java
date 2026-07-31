@@ -1,13 +1,14 @@
 package com.example.medicinebox.service;
 
 import com.example.medicinebox.config.AlertingProperties;
+import com.example.medicinebox.constant.AlertStatus;
 import com.example.medicinebox.entity.AlertRecord;
 import com.example.medicinebox.repository.AlertRecordRepository;
+import com.example.medicinebox.util.PaginationUtil;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.search.Search;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -15,6 +16,7 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.PostConstruct;
 import java.lang.management.ManagementFactory;
@@ -24,7 +26,10 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 系统告警服务类
@@ -36,29 +41,36 @@ public class AlertingService {
 
     private static final Logger log = LoggerFactory.getLogger(AlertingService.class);
 
-    // 告警配置属性
-    @Autowired
-    private AlertingProperties properties;
-
-    // 告警记录数据访问层
-    @Autowired
-    private AlertRecordRepository alertRecordRepository;
-
-    // 邮件发送器（可选配置）
-    @Autowired(required = false)
-    private JavaMailSender mailSender;
-
-    // 指标注册表
-    @Autowired
-    private MeterRegistry meterRegistry;
-
-    // 上次告警时间映射，用于告警风暴抑制（避免短时间内重复告警）
-    private final Map<String, LocalDateTime> lastAlertTime = new HashMap<>();
+    private final AlertingProperties properties;
+    private final AlertRecordRepository alertRecordRepository;
+    /** 邮件发送器（可选依赖，通过 Optional 构造函数注入，无 Mail 配置时自动为 null） */
+    private final JavaMailSender mailSender;
+    private final MeterRegistry meterRegistry;
 
     /**
-     * 服务初始化方法
-     * Bean初始化完成后执行，输出告警服务启用状态
+     * 告警风暴抑制映射，使用 ConcurrentHashMap 保证线程安全
      */
+    private final Map<String, LocalDateTime> lastAlertTime = new ConcurrentHashMap<>();
+
+    /**
+     * 上一轮指标快照，用于 delta 计算，通过 AtomicLong 保证原子操作
+     * 每次检查时计算 delta = 当前累计值 - 上一轮快照，仅反映最近检查窗口内的变化
+     */
+    private final AtomicLong previousTotalRequests = new AtomicLong(0);
+    private final AtomicLong previousErrorRequests = new AtomicLong(0);
+    private final AtomicLong previousResponseCount = new AtomicLong(0);
+    private final AtomicLong previousResponseTotalTimeNs = new AtomicLong(0);
+
+    public AlertingService(AlertingProperties properties,
+                           AlertRecordRepository alertRecordRepository,
+                           Optional<JavaMailSender> mailSender,
+                           MeterRegistry meterRegistry) {
+        this.properties = properties;
+        this.alertRecordRepository = alertRecordRepository;
+        this.mailSender = mailSender.orElse(null);
+        this.meterRegistry = meterRegistry;
+    }
+
     @PostConstruct
     public void init() {
         log.info("告警服务初始化完成, 告警启用: {}", properties.isEnabled());
@@ -66,7 +78,6 @@ public class AlertingService {
 
     /**
      * 定时检查各项指标 - 每分钟执行一次
-     * 依次检查异常率、响应时间、CPU使用率、内存使用率
      */
     @Scheduled(fixedRate = 60000)
     public void checkMetrics() {
@@ -85,45 +96,47 @@ public class AlertingService {
 
     /**
      * 检查API异常率
-     * 从Micrometer指标中统计HTTP请求错误率（4xx/5xx状态码），超过阈值则触发告警
+     *
+     * <p>通过 delta 计算（当前累计值 - 上一轮快照）获取最近检查窗口内的请求数据，
+     * 异常率 = delta_errors / delta_total，避免累计值导致的历史数据稀释问题。
      */
     private void checkErrorRate() {
         try {
             Search search = meterRegistry.find("http.server.requests");
-            // 计算总请求数和错误请求数
-            long totalRequests = 0;
-            long errorRequests = 0;
-            
+            long currentTotal = 0;
+            long currentErrors = 0;
+
             java.util.Collection<io.micrometer.core.instrument.Meter> meterCollection = search.meters();
             for (io.micrometer.core.instrument.Meter meter : meterCollection) {
                 if (meter instanceof io.micrometer.core.instrument.Timer) {
                     io.micrometer.core.instrument.Timer timer = (io.micrometer.core.instrument.Timer) meter;
                     long count = timer.count();
                     String status = timer.getId().getTag("status");
-                    // 4xx和5xx状态码视为错误请求
                     if (status != null && (status.startsWith("4") || status.startsWith("5"))) {
-                        errorRequests += count;
+                        currentErrors += count;
                     }
-                    totalRequests += count;
+                    currentTotal += count;
                 }
             }
-            
-            // 无请求时不检查
-            if (totalRequests == 0) {
+
+            // 计算本窗口内的增量
+            long prevTotal = previousTotalRequests.getAndSet(currentTotal);
+            long prevErrors = previousErrorRequests.getAndSet(currentErrors);
+            long deltaTotal = safeDelta(currentTotal, prevTotal);
+            long deltaErrors = safeDelta(currentErrors, prevErrors);
+
+            if (deltaTotal == 0) {
                 return;
             }
-            
-            double errorRate = (double) errorRequests / totalRequests;
+
+            double errorRate = (double) deltaErrors / deltaTotal;
             double threshold = properties.getRules().getErrorRate().getThreshold();
-            
-            // 异常率超过阈值且满足告警抑制条件则触发告警
+
             if (errorRate > threshold) {
                 String alertKey = "error_rate";
                 if (shouldAlert(alertKey)) {
-                    String content = String.format("API 异常率 %.2f%% 超过阈值 %.2f%%（过去 %d 秒内总请求 %d，错误 %d）",
-                            errorRate * 100, threshold * 100,
-                            properties.getRules().getErrorRate().getWindowSeconds(),
-                            totalRequests, errorRequests);
+                    String content = String.format("API 异常率 %.2f%% 超过阈值 %.2f%%（最近窗口内请求 %d，错误 %d）",
+                            errorRate * 100, threshold * 100, deltaTotal, deltaErrors);
                     triggerAlert(alertKey, "WARNING", "API 异常率告警", content,
                             String.format("%.4f", errorRate), String.format("%.4f", threshold));
                 }
@@ -135,43 +148,48 @@ public class AlertingService {
 
     /**
      * 检查API平均响应时间
-     * 从自定义指标中计算平均响应时间，超过阈值则触发告警
+     *
+     * <p>通过 totalTime() 和 count() 的 delta 计算最近窗口内的平均响应时间，
+     * 避免累计值导致的历史数据稀释问题。
      */
     private void checkResponseTime() {
         try {
             Search search = meterRegistry.find("http.custom.request.duration");
             java.util.Collection<io.micrometer.core.instrument.Meter> meterCollection = search.meters();
-            
+
             if (meterCollection.isEmpty()) {
                 return;
             }
-            
-            long totalCount = 0;
-            double totalTimeMs = 0;
+
+            long currentCount = 0;
+            long currentTotalTimeNs = 0;
             for (io.micrometer.core.instrument.Meter meter : meterCollection) {
                 if (meter instanceof io.micrometer.core.instrument.Timer) {
                     io.micrometer.core.instrument.Timer timer = (io.micrometer.core.instrument.Timer) meter;
-                    long count = timer.count();
-                    double mean = timer.mean(java.util.concurrent.TimeUnit.MILLISECONDS);
-                    totalCount += count;
-                    totalTimeMs += mean * count;
+                    currentCount += timer.count();
+                    currentTotalTimeNs += timer.totalTime(TimeUnit.NANOSECONDS);
                 }
             }
-            
-            if (totalCount == 0) {
+
+            long prevCount = previousResponseCount.getAndSet(currentCount);
+            long prevTotalTimeNs = previousResponseTotalTimeNs.getAndSet(currentTotalTimeNs);
+            long deltaCount = safeDelta(currentCount, prevCount);
+            long deltaTotalTimeNs = safeDelta(currentTotalTimeNs, prevTotalTimeNs);
+
+            if (deltaCount == 0) {
                 return;
             }
-            
-            double avgTime = totalTimeMs / totalCount;
+
+            double avgTimeMs = deltaTotalTimeNs / (double) deltaCount / 1_000_000.0;
             long threshold = properties.getRules().getResponseTime().getThresholdMs();
-            
-            if (avgTime > threshold) {
+
+            if (avgTimeMs > threshold) {
                 String alertKey = "response_time";
                 if (shouldAlert(alertKey)) {
                     String content = String.format("API 平均响应时间 %.0fms 超过阈值 %dms",
-                            avgTime, threshold);
+                            avgTimeMs, threshold);
                     triggerAlert(alertKey, "WARNING", "API 响应时间告警", content,
-                            String.format("%.0fms", avgTime), threshold + "ms");
+                            String.format("%.0fms", avgTimeMs), threshold + "ms");
                 }
             }
         } catch (Exception e) {
@@ -180,19 +198,28 @@ public class AlertingService {
     }
 
     /**
+     * 安全计算 delta 值
+     * 当累计值异常回退（如应用重启）时，以当前值作为 delta
+     */
+    private long safeDelta(long current, long previous) {
+        if (current < previous) {
+            return current;
+        }
+        return current - previous;
+    }
+
+    /**
      * 检查CPU使用率
-     * 通过JMX获取系统负载，计算每CPU平均负载，超过阈值则触发严重告警
      */
     private void checkCpuUsage() {
         try {
             OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
             double cpuLoad = osBean.getSystemLoadAverage() / osBean.getAvailableProcessors();
-            
-            if (cpuLoad < 0) return; // 系统不支持时返回 -1
-            
+
+            if (cpuLoad < 0) return;
+
             double threshold = properties.getRules().getCpuUsage().getThreshold();
-            
-            // CPU负载超过阈值则触发严重告警
+
             if (cpuLoad > threshold) {
                 String alertKey = "cpu_usage";
                 if (shouldAlert(alertKey)) {
@@ -208,19 +235,18 @@ public class AlertingService {
 
     /**
      * 检查JVM堆内存使用率
-     * 通过JMX获取堆内存使用情况，超过阈值则触发严重告警
      */
     private void checkMemoryUsage() {
         try {
             MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
             long used = memoryBean.getHeapMemoryUsage().getUsed();
             long max = memoryBean.getHeapMemoryUsage().getMax();
-            
+
             if (max <= 0) return;
-            
+
             double usage = (double) used / max;
             double threshold = properties.getRules().getMemoryUsage().getThreshold();
-            
+
             if (usage > threshold) {
                 String alertKey = "memory_usage";
                 if (shouldAlert(alertKey)) {
@@ -237,15 +263,11 @@ public class AlertingService {
 
     /**
      * 判断是否应该触发告警（告警风暴抑制）
-     * 同类型告警5分钟内只发送一次，避免告警风暴
-     *
-     * @param alertKey 告警类型键
-     * @return true-应该触发告警，false-抑制告警
+     * 同类型告警5分钟内只发送一次，使用 ConcurrentHashMap 保证线程安全
      */
     private boolean shouldAlert(String alertKey) {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime lastTime = lastAlertTime.get(alertKey);
-        // 首次告警或距离上次告警超过5分钟则触发
         if (lastTime == null || now.isAfter(lastTime.plusMinutes(5))) {
             lastAlertTime.put(alertKey, now);
             return true;
@@ -255,19 +277,11 @@ public class AlertingService {
 
     /**
      * 触发告警
-     * 保存告警记录到数据库，根据配置决定是否发送邮件通知
-     *
-     * @param type 告警类型
-     * @param level 告警级别（WARNING/CRITICAL等）
-     * @param title 告警标题
-     * @param content 告警内容
-     * @param metricValue 当前指标值
-     * @param threshold 阈值
      */
     public void triggerAlert(String type, String level, String title, String content,
                               String metricValue, String threshold) {
         log.warn("触发告警: {} - {} - {}", type, level, title);
-        
+
         AlertRecord alert = new AlertRecord();
         alert.setType(type);
         alert.setLevel(level);
@@ -275,15 +289,14 @@ public class AlertingService {
         alert.setContent(content);
         alert.setMetricValue(metricValue);
         alert.setThresholdValue(threshold);
-        alert.setStatus("PENDING");
-        
+        alert.setStatus(AlertStatus.PENDING);
+
         try {
             alertRecordRepository.save(alert);
         } catch (Exception e) {
             log.error("保存告警记录失败", e);
         }
-        
-        // 邮件告警功能启用且邮件发送器存在时，发送邮件
+
         if (properties.getEmail().isEnabled() && mailSender != null) {
             try {
                 sendEmailAlert(title, content, level);
@@ -295,10 +308,6 @@ public class AlertingService {
 
     /**
      * 发送告警邮件
-     *
-     * @param title 邮件标题
-     * @param content 邮件内容
-     * @param level 告警级别
      */
     private void sendEmailAlert(String title, String content, String level) {
         SimpleMailMessage message = new SimpleMailMessage();
@@ -311,12 +320,6 @@ public class AlertingService {
 
     /**
      * 手动触发告警（用于测试）
-     *
-     * @param type 告警类型
-     * @param level 告警级别
-     * @param title 告警标题
-     * @param content 告警内容
-     * @return 保存后的告警记录
      */
     public AlertRecord manualTrigger(String type, String level, String title, String content) {
         AlertRecord alert = new AlertRecord();
@@ -324,60 +327,66 @@ public class AlertingService {
         alert.setLevel(level);
         alert.setTitle(title);
         alert.setContent(content);
-        alert.setStatus("PENDING");
+        alert.setStatus(AlertStatus.PENDING);
         return alertRecordRepository.save(alert);
     }
 
     /**
-     * 分页查询告警列表
-     * 支持按状态筛选
-     *
-     * @param status 告警状态（可选）
-     * @param page 页码（从0开始）
-     * @param size 每页大小
-     * @return 告警记录分页结果
+     * 分页查询告警列表，支持按状态筛选，pageSize 上限 100
      */
+    @Transactional(readOnly = true)
     public Page<AlertRecord> getAlerts(String status, int page, int size) {
-        Pageable pageable = PageRequest.of(page, size);
+        int validatedPage = PaginationUtil.validatePage(page);
+        int validatedSize = PaginationUtil.validateSize(size);
+        Pageable pageable = PageRequest.of(validatedPage, validatedSize);
         if (status != null && !status.isEmpty()) {
-            return alertRecordRepository.findByStatus(status, pageable);
+            return alertRecordRepository.findByStatus(AlertStatus.valueOf(status), pageable);
         }
         return alertRecordRepository.findAll(pageable);
     }
 
     /**
      * 处理告警
-     * 设置处理人、处理时间、处理备注和处理状态
-     *
-     * @param id 告警记录ID
-     * @param handledBy 处理人
-     * @param remark 处理备注
-     * @param status 处理后状态
-     * @return 更新后的告警记录
-     * @throws IllegalArgumentException 告警记录不存在时抛出
      */
     public AlertRecord handleAlert(Long id, String handledBy, String remark, String status) {
         AlertRecord alert = alertRecordRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("告警记录不存在: " + id));
-        alert.setHandledBy(handledBy);
-        alert.setHandledAt(LocalDateTime.now());
-        alert.setHandleRemark(remark);
-        alert.setStatus(status);
+        AlertStatus newStatus = AlertStatus.valueOf(status);
+        if (AlertStatus.RESOLVED == newStatus) {
+            alert.resolve(handledBy, remark);
+        } else if (AlertStatus.IGNORED == newStatus) {
+            alert.ignore(handledBy, remark);
+        } else {
+            alert.setHandledBy(handledBy);
+            alert.setHandledAt(LocalDateTime.now());
+            alert.setHandleRemark(remark);
+            alert.setStatus(newStatus);
+        }
         return alertRecordRepository.save(alert);
     }
 
     /**
      * 统计告警数量
-     * 包含总数、待处理数、已解决数、已忽略数
      *
-     * @return 告警统计Map
+     * <p>使用一次聚合查询（COUNT + SUM + CASE WHEN）同时返回 total、pending、resolved、ignored 四种统计值。
      */
     public Map<String, Long> getAlertStats() {
+        List<Object[]> result = alertRecordRepository.countStats();
         Map<String, Long> stats = new HashMap<>();
-        stats.put("total", alertRecordRepository.count());
-        stats.put("pending", alertRecordRepository.countByStatus("PENDING"));
-        stats.put("resolved", alertRecordRepository.countByStatus("RESOLVED"));
-        stats.put("ignored", alertRecordRepository.countByStatus("IGNORED"));
+
+        if (!result.isEmpty() && result.get(0)[0] != null) {
+            Object[] row = result.get(0);
+            stats.put("total", ((Number) row[0]).longValue());
+            stats.put("pending", row[1] != null ? ((Number) row[1]).longValue() : 0L);
+            stats.put("resolved", row[2] != null ? ((Number) row[2]).longValue() : 0L);
+            stats.put("ignored", row[3] != null ? ((Number) row[3]).longValue() : 0L);
+        } else {
+            stats.put("total", 0L);
+            stats.put("pending", 0L);
+            stats.put("resolved", 0L);
+            stats.put("ignored", 0L);
+        }
+
         return stats;
     }
 }

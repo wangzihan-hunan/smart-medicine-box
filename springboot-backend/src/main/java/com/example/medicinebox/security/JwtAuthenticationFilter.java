@@ -12,6 +12,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
+import com.example.medicinebox.util.PhoneUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -126,7 +127,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     // 将认证信息设置到SecurityContext中
                     SecurityContextHolder.getContext().setAuthentication(authToken);
                     // 对手机号进行脱敏处理
-                    String maskedPhone = maskPhone(phone);
+                    String maskedPhone = PhoneUtils.maskPhone(phone);
                     // 将脱敏后的手机号存入MDC，用于日志追踪
                     MDC.put("userPhone", maskedPhone);
                     log.debug("JWT认证成功, 用户手机号: {}", maskedPhone);
@@ -142,19 +143,5 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         // 继续过滤器链
         filterChain.doFilter(request, response);
-    }
-
-    /**
-     * 手机号脱敏处理
-     *
-     * <p>将手机号中间4位替换为****，保护用户隐私。
-     * 例如：13812345678 -> 138****5678
-     *
-     * @param phone 原始手机号
-     * @return 脱敏后的手机号
-     */
-    private String maskPhone(String phone) {
-        if (phone == null || phone.length() < 7) return phone;
-        return phone.substring(0, 3) + "****" + phone.substring(phone.length() - 4);
     }
 }

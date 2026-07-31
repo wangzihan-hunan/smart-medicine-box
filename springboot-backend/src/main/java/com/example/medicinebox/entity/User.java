@@ -1,5 +1,9 @@
 package com.example.medicinebox.entity;
 
+import com.example.medicinebox.constant.UserRole;
+import com.example.medicinebox.constant.UserStatus;
+import com.example.medicinebox.constant.UserPlan;
+
 import javax.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -41,12 +45,14 @@ public class User {
     private String name;
 
     // 用户角色：USER(普通用户)、ADMIN(管理员)等
+    @Enumerated(EnumType.STRING)
     @Column(length = 20, nullable = false)
-    private String role = "USER";
+    private UserRole role = UserRole.USER;
 
     // 账号状态：ACTIVE(正常)、LOCKED(锁定)、DISABLED(禁用)等
+    @Enumerated(EnumType.STRING)
     @Column(length = 20, nullable = false)
-    private String status = "ACTIVE";
+    private UserStatus status = UserStatus.ACTIVE;
 
     // 手机号是否已验证
     @Column(name = "phone_verified")
@@ -69,8 +75,9 @@ public class User {
     private String lastIp;
 
     // 用户套餐类型：FREE(免费版)、BASIC(基础版)、PROFESSIONAL(专业版)
+    @Enumerated(EnumType.STRING)
     @Column(name = "plan", length = 20)
-    private String plan = "FREE";
+    private UserPlan plan = UserPlan.FREE;
 
     // 套餐到期时间
     @Column(name = "plan_expire_at")
@@ -105,11 +112,11 @@ public class User {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
-        if (role == null) role = "USER";
-        if (status == null) status = "ACTIVE";
+        if (role == null) role = UserRole.USER;
+        if (status == null) status = UserStatus.ACTIVE;
         if (phoneVerified == null) phoneVerified = false;
         if (loginAttempts == null) loginAttempts = 0;
-        if (plan == null) plan = "FREE";
+        if (plan == null) plan = UserPlan.FREE;
         if (monthAiCount == null) monthAiCount = 0;
         if (monthAiLimit == null) monthAiLimit = 5;
         if (monthResetAt == null) monthResetAt = LocalDateTime.now();
@@ -120,5 +127,78 @@ public class User {
     @PreUpdate
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
+    }
+
+    // ==================== 领域方法 ====================
+
+    /** 账号是否处于激活状态 */
+    public boolean isActive() {
+        return UserStatus.ACTIVE == status;
+    }
+
+    /** 账号是否被锁定 */
+    public boolean isLocked() {
+        return UserStatus.LOCKED == status;
+    }
+
+    /** 账号是否被封禁 */
+    public boolean isBlocked() {
+        return UserStatus.BLOCKED == status;
+    }
+
+    /** 账号是否被冻结 */
+    public boolean isSuspended() {
+        return UserStatus.SUSPENDED == status;
+    }
+
+    /** 是否为管理员 */
+    public boolean isAdmin() {
+        return UserRole.ADMIN == role;
+    }
+
+    /**
+     * 判断锁定期是否已过，可以自动解锁
+     * @param lockDurationMinutes 锁定时长（分钟）
+     */
+    public boolean shouldAutoUnlock(long lockDurationMinutes) {
+        return isLocked() && lockTime != null
+                && LocalDateTime.now().isAfter(lockTime.plusMinutes(lockDurationMinutes));
+    }
+
+    /** 解锁账号：重置状态、锁定时间和登录尝试次数 */
+    public void unlock() {
+        this.status = UserStatus.ACTIVE;
+        this.lockTime = null;
+        this.loginAttempts = 0;
+    }
+
+    /**
+     * 增加登录失败次数，达到阈值时自动锁定
+     * @param maxAttempts 最大尝试次数阈值
+     */
+    public void incrementLoginAttempts(int maxAttempts) {
+        this.loginAttempts = (this.loginAttempts == null ? 0 : this.loginAttempts) + 1;
+        if (this.loginAttempts >= maxAttempts) {
+            this.status = UserStatus.LOCKED;
+            this.lockTime = LocalDateTime.now();
+        }
+    }
+
+    /** 重置登录尝试次数 */
+    public void resetLoginAttempts() {
+        this.loginAttempts = 0;
+        this.lastLoginTime = LocalDateTime.now();
+    }
+
+    /** 封禁账号 */
+    public void block() {
+        this.status = UserStatus.BLOCKED;
+        this.lockTime = LocalDateTime.now();
+    }
+
+    /** 冻结账号 */
+    public void suspend() {
+        this.status = UserStatus.SUSPENDED;
+        this.lockTime = LocalDateTime.now();
     }
 }

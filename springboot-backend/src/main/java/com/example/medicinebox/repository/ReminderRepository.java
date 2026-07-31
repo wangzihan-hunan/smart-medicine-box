@@ -72,4 +72,21 @@ public interface ReminderRepository extends JpaRepository<Reminder, Integer> {
      * @return 提醒列表
      */
     List<Reminder> findByIsActiveTrueAndTakenFalseAndNextRemindTimeLessThanEqual(LocalDateTime time);
+
+    /**
+     * 根据时间、激活状态、服用状态和日期范围分页查询待触发提醒
+     * 用于定时任务逐批处理，避免 findAll() 全量加载导致内存溢出
+     * @param time 提醒时间（HH:mm）
+     * @param startDate 开始日期上限
+     * @param endDate 结束日期下限
+     * @param pageable 分页参数
+     * @return 分页提醒列表
+     */
+    @Query("SELECT r FROM Reminder r WHERE r.time = :time AND r.isActive = true AND r.taken = false " +
+           "AND r.startDate <= :startDate AND r.endDate >= :endDate")
+    Page<Reminder> findByTimeAndIsActiveTrueAndTakenFalseAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
+            @Param("time") String time,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            Pageable pageable);
 }

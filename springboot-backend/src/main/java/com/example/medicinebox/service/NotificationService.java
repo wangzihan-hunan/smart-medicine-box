@@ -6,9 +6,10 @@ import com.example.medicinebox.entity.Notification;
 import com.example.medicinebox.entity.User;
 import com.example.medicinebox.exception.ResourceNotFoundException;
 import com.example.medicinebox.repository.NotificationRepository;
+import com.example.medicinebox.repository.UserRepository;
+import com.example.medicinebox.util.PaginationUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -30,11 +31,15 @@ public class NotificationService extends BaseService {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
-    @Autowired
-    private NotificationRepository notificationRepository;
+    private final NotificationRepository notificationRepository;
+    private final WebSocketPushService webSocketPushService;
 
-    @Autowired
-    private WebSocketPushService webSocketPushService;
+    public NotificationService(UserRepository userRepository, NotificationRepository notificationRepository,
+                               WebSocketPushService webSocketPushService) {
+        super(userRepository);
+        this.notificationRepository = notificationRepository;
+        this.webSocketPushService = webSocketPushService;
+    }
 
     /**
      * 发送通知给指定用户
@@ -58,17 +63,20 @@ public class NotificationService extends BaseService {
 
     /**
      * 分页查询当前用户的通知列表
-     * 按创建时间倒序排列
+     * 按创建时间倒序排列，pageSize 上限 100
      *
      * @param page 页码（从0开始）
      * @param size 每页大小
      * @return 通知响应列表
      */
+    @Transactional(readOnly = true)
     public List<NotificationResponse> getNotifications(int page, int size) {
         User user = getCurrentUser();
-        log.debug("查询通知列表, 用户ID: {}", user.getId());
+        int validatedPage = PaginationUtil.validatePage(page);
+        int validatedSize = PaginationUtil.validateSize(size);
+        log.debug("查询通知列表, 用户ID: {}, 页码: {}, 大小: {}", user.getId(), validatedPage, validatedSize);
         
-        Pageable pageable = PageRequest.of(page, size);
+        Pageable pageable = PageRequest.of(validatedPage, validatedSize);
         Page<Notification> notificationPage = notificationRepository.findByUserIdOrderByCreatedAtDesc(user.getId(), pageable);
         
         List<NotificationResponse> responseList = notificationPage.getContent().stream()
@@ -81,14 +89,22 @@ public class NotificationService extends BaseService {
 
     /**
      * 获取当前用户的通知统计
-     * 包含未读数量和总数量
+     *
+     * <p>使用一次聚合查询（COUNT + SUM + CASE WHEN）同时返回总数和未读数。
      *
      * @return 通知统计Map（unreadCount-未读数，totalCount-总数）
      */
     public Map<String, Object> getNotificationStats() {
         User user = getCurrentUser();
-        long unreadCount = notificationRepository.countByUserIdAndReadStatus(user.getId(), false);
-        long totalCount = notificationRepository.countByUserIdAndReadStatus(user.getId(), true) + unreadCount;
+        
+        List<Object[]> result = notificationRepository.countStatsByUserId(user.getId());
+        long totalCount = 0;
+        long unreadCount = 0;
+        
+        if (!result.isEmpty() && result.get(0)[0] != null) {
+            totalCount = ((Number) result.get(0)[0]).longValue();
+            unreadCount = result.get(0)[1] != null ? ((Number) result.get(0)[1]).longValue() : 0;
+        }
         
         Map<String, Object> stats = new HashMap<>();
         stats.put("unreadCount", unreadCount);
@@ -113,13 +129,11 @@ public class NotificationService extends BaseService {
         Notification notification = notificationRepository.findById(notificationId)
                 .orElseThrow(() -> new ResourceNotFoundException("通知不存在"));
         
-        // 校验通知归属权
         if (!notification.getUserId().equals(user.getId())) {
             throw new SecurityException("无权操作此通知");
         }
         
-        notification.setReadStatus(true);
-        notification.setReadAt(LocalDateTime.now());
+        notification.markAsRead();
         notificationRepository.save(notification);
 
         webSocketPushService.syncNotificationState(user.getId(), "READ");
@@ -128,25 +142,18 @@ public class NotificationService extends BaseService {
 
     /**
      * 标记当前用户所有未读通知为已读
-     * 批量处理（每次最多100条）
+     *
+     * <p>使用一条 UPDATE 语句批量更新所有未读通知，无数量限制。
      */
     @Transactional
     public void markAllAsRead() {
         User user = getCurrentUser();
         log.debug("标记所有通知已读, 用户ID: {}", user.getId());
         
-        Pageable pageable = PageRequest.of(0, 100);
-        Page<Notification> unreadNotifications = notificationRepository.findByUserIdAndReadStatusOrderByCreatedAtDesc(user.getId(), false, pageable);
+        int updated = notificationRepository.markAllAsReadByUserId(user.getId(), LocalDateTime.now());
         
-        // 批量标记已读
-        for (Notification notification : unreadNotifications.getContent()) {
-            notification.setReadStatus(true);
-            notification.setReadAt(LocalDateTime.now());
-            notificationRepository.save(notification);
-        }
-
         webSocketPushService.syncNotificationState(user.getId(), "READ_ALL");
-        log.info("所有通知已标记为已读, 用户ID: {}", user.getId());
+        log.info("所有通知已标记为已读, 用户ID: {}, 更新条数: {}", user.getId(), updated);
     }
 
     /**
@@ -165,7 +172,6 @@ public class NotificationService extends BaseService {
         Notification notification = notificationRepository.findById(notificationId)
                 .orElseThrow(() -> new ResourceNotFoundException("通知不存在"));
         
-        // 校验通知归属权
         if (!notification.getUserId().equals(user.getId())) {
             throw new SecurityException("无权操作此通知");
         }

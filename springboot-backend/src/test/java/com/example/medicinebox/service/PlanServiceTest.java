@@ -1,5 +1,6 @@
 package com.example.medicinebox.service;
 
+import com.example.medicinebox.constant.UserPlan;
 import com.example.medicinebox.entity.User;
 import com.example.medicinebox.enums.PlanType;
 import com.example.medicinebox.repository.UserRepository;
@@ -39,7 +40,7 @@ class PlanServiceTest {
         testUser = new User();
         testUser.setId(1);
         testUser.setPhone("13800138000");
-        testUser.setPlan("FREE");
+        testUser.setPlan(UserPlan.FREE);
         testUser.setMonthAiCount(0);
         testUser.setMonthAiLimit(10);
         testUser.setMonthResetAt(LocalDateTime.now());
@@ -49,7 +50,7 @@ class PlanServiceTest {
     @DisplayName("获取用户套餐 - 免费版用户")
     void getUserPlan_freeUserShouldReturnFree() {
         // Given
-        testUser.setPlan("FREE");
+        testUser.setPlan(UserPlan.FREE);
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
 
         // When
@@ -63,7 +64,7 @@ class PlanServiceTest {
     @DisplayName("获取用户套餐 - 专业版用户")
     void getUserPlan_proUserShouldReturnProfessional() {
         // Given
-        testUser.setPlan("PROFESSIONAL");
+        testUser.setPlan(UserPlan.PROFESSIONAL);
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
 
         // When
@@ -90,7 +91,7 @@ class PlanServiceTest {
     @DisplayName("检查套餐有效性 - 免费版永久有效")
     void hasActivePlan_freePlanAlwaysActive() {
         // Given
-        testUser.setPlan("FREE");
+        testUser.setPlan(UserPlan.FREE);
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
 
         // When
@@ -104,7 +105,7 @@ class PlanServiceTest {
     @DisplayName("检查套餐有效性 - 付费版未过期")
     void hasActivePlan_paidPlanNotExpired() {
         // Given
-        testUser.setPlan("PROFESSIONAL");
+        testUser.setPlan(UserPlan.PROFESSIONAL);
         testUser.setPlanExpireAt(LocalDateTime.now().plusMonths(1));
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
 
@@ -119,7 +120,7 @@ class PlanServiceTest {
     @DisplayName("检查套餐有效性 - 付费版已过期")
     void hasActivePlan_paidPlanExpired() {
         // Given
-        testUser.setPlan("PROFESSIONAL");
+        testUser.setPlan(UserPlan.PROFESSIONAL);
         testUser.setPlanExpireAt(LocalDateTime.now().minusDays(1));
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
 
@@ -147,7 +148,7 @@ class PlanServiceTest {
     @DisplayName("AI识别次数检查 - 免费版在限额内")
     void canUseAiRecognition_freePlanWithinLimit() {
         // Given
-        testUser.setPlan("FREE");
+        testUser.setPlan(UserPlan.FREE);
         testUser.setMonthAiCount(5);
         testUser.setMonthAiLimit(10);
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
@@ -163,7 +164,7 @@ class PlanServiceTest {
     @DisplayName("AI识别次数检查 - 免费版超限")
     void canUseAiRecognition_freePlanExceededLimit() {
         // Given
-        testUser.setPlan("FREE");
+        testUser.setPlan(UserPlan.FREE);
         testUser.setMonthAiCount(10);
         testUser.setMonthAiLimit(10);
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
@@ -179,7 +180,7 @@ class PlanServiceTest {
     @DisplayName("AI识别次数检查 - 专业版不限次数")
     void canUseAiRecognition_proPlanUnlimited() {
         // Given
-        testUser.setPlan("PROFESSIONAL");
+        testUser.setPlan(UserPlan.PROFESSIONAL);
         testUser.setPlanExpireAt(LocalDateTime.now().plusMonths(1));
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
 
@@ -194,7 +195,7 @@ class PlanServiceTest {
     @DisplayName("消耗AI识别次数 - 成功")
     void consumeAiRecognition_shouldSucceed() {
         // Given
-        testUser.setPlan("FREE");
+        testUser.setPlan(UserPlan.FREE);
         testUser.setMonthAiCount(5);
         testUser.setMonthAiLimit(10);
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
@@ -212,7 +213,7 @@ class PlanServiceTest {
     @DisplayName("消耗AI识别次数 - 超限应失败")
     void consumeAiRecognition_exceededShouldFail() {
         // Given
-        testUser.setPlan("FREE");
+        testUser.setPlan(UserPlan.FREE);
         testUser.setMonthAiCount(10);
         testUser.setMonthAiLimit(10);
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
@@ -229,7 +230,7 @@ class PlanServiceTest {
     @DisplayName("消耗AI识别次数 - 专业版不扣减")
     void consumeAiRecognition_proPlanNoDeduction() {
         // Given
-        testUser.setPlan("PROFESSIONAL");
+        testUser.setPlan(UserPlan.PROFESSIONAL);
         testUser.setPlanExpireAt(LocalDateTime.now().plusMonths(1));
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
 
@@ -271,7 +272,7 @@ class PlanServiceTest {
     @DisplayName("获取剩余AI次数 - 免费版")
     void getRemainingAiCount_freePlan() {
         // Given
-        testUser.setPlan("FREE");
+        testUser.setPlan(UserPlan.FREE);
         testUser.setMonthAiCount(3);
         testUser.setMonthAiLimit(10);
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
@@ -287,7 +288,7 @@ class PlanServiceTest {
     @DisplayName("获取剩余AI次数 - 专业版无限")
     void getRemainingAiCount_proPlanUnlimited() {
         // Given
-        testUser.setPlan("PROFESSIONAL");
+        testUser.setPlan(UserPlan.PROFESSIONAL);
         testUser.setPlanExpireAt(LocalDateTime.now().plusMonths(1));
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));
 
@@ -302,7 +303,7 @@ class PlanServiceTest {
     @DisplayName("获取套餐详情 - 成功")
     void getPlanInfo_shouldSucceed() {
         // Given
-        testUser.setPlan("FREE");
+        testUser.setPlan(UserPlan.FREE);
         testUser.setMonthAiCount(5);
         testUser.setMonthAiLimit(10);
         when(userRepository.findById(1)).thenReturn(Optional.of(testUser));

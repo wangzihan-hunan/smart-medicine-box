@@ -1,21 +1,26 @@
 package com.example.medicinebox.service;
 
+import com.example.medicinebox.constant.FeedbackStatus;
 import com.example.medicinebox.dto.response.FeedbackListResponse;
 import com.example.medicinebox.dto.response.FeedbackResponse;
 import com.example.medicinebox.entity.Feedback;
 import com.example.medicinebox.entity.User;
 import com.example.medicinebox.exception.ResourceNotFoundException;
 import com.example.medicinebox.repository.FeedbackRepository;
+import com.example.medicinebox.repository.UserRepository;
+import com.example.medicinebox.util.PaginationUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
+import javax.persistence.criteria.Predicate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -28,8 +33,12 @@ public class FeedbackService extends BaseService {
 
     private static final Logger log = LoggerFactory.getLogger(FeedbackService.class);
 
-    @Autowired
-    private FeedbackRepository feedbackRepository;
+    private final FeedbackRepository feedbackRepository;
+
+    public FeedbackService(UserRepository userRepository, FeedbackRepository feedbackRepository) {
+        super(userRepository);
+        this.feedbackRepository = feedbackRepository;
+    }
 
     /**
      * 提交意见反馈
@@ -51,7 +60,7 @@ public class FeedbackService extends BaseService {
         feedback.setTitle(title);
         feedback.setContent(content);
         feedback.setContact(contact);
-        feedback.setStatus("PENDING");
+        feedback.setStatus(FeedbackStatus.PENDING);
 
         feedback = feedbackRepository.save(feedback);
         log.info("反馈提交成功, ID: {}, 用户ID: {}", feedback.getId(), user.getId());
@@ -68,16 +77,19 @@ public class FeedbackService extends BaseService {
      * @param status 反馈状态筛选（可选）
      * @return 分页反馈列表响应
      */
+    @Transactional(readOnly = true)
     public FeedbackListResponse getMyFeedbacks(int page, int size, String status) {
         User user = getCurrentUser();
+        int validatedPage = PaginationUtil.validatePage(page);
+        int validatedSize = PaginationUtil.validateSize(size);
         log.debug("查询我的反馈列表, 用户ID: {}, 状态: {}", user.getId(), status);
 
-        Pageable pageable = PageRequest.of(page, size);
+        Pageable pageable = PageRequest.of(validatedPage, validatedSize);
         Page<Feedback> feedbackPage;
 
         // 按状态筛选或查询全部
         if (status != null && !status.isEmpty()) {
-            feedbackPage = feedbackRepository.findByUserIdAndStatusOrderByCreatedAtDesc(user.getId(), status, pageable);
+            feedbackPage = feedbackRepository.findByUserIdAndStatusOrderByCreatedAtDesc(user.getId(), FeedbackStatus.valueOf(status), pageable);
         } else {
             feedbackPage = feedbackRepository.findByUserIdOrderByCreatedAtDesc(user.getId(), pageable);
         }
@@ -105,7 +117,7 @@ public class FeedbackService extends BaseService {
                 .orElseThrow(() -> new ResourceNotFoundException("反馈不存在"));
 
         // 权限校验：只能查看自己的反馈，管理员除外
-        if (!feedback.getUserId().equals(user.getId()) && !"ADMIN".equals(user.getRole())) {
+        if (!feedback.getUserId().equals(user.getId()) && !user.isAdmin()) {
             throw new ResourceNotFoundException("反馈不存在");
         }
 
@@ -128,7 +140,7 @@ public class FeedbackService extends BaseService {
                 .orElseThrow(() -> new ResourceNotFoundException("反馈不存在"));
 
         // 权限校验：只能删除自己的反馈，管理员除外
-        if (!feedback.getUserId().equals(user.getId()) && !"ADMIN".equals(user.getRole())) {
+        if (!feedback.getUserId().equals(user.getId()) && !user.isAdmin()) {
             throw new ResourceNotFoundException("反馈不存在");
         }
 
@@ -138,7 +150,9 @@ public class FeedbackService extends BaseService {
 
     /**
      * 管理员分页查询所有反馈
-     * 支持按状态和类型筛选
+     * 支持同时按状态和类型组合筛选，pageSize 上限 100
+     *
+     * <p>使用 JPA Specification 动态组合筛选条件，status 和 type 可同时生效。
      *
      * @param page 页码
      * @param size 每页大小
@@ -146,25 +160,41 @@ public class FeedbackService extends BaseService {
      * @param type 类型筛选（可选）
      * @return 分页反馈列表响应
      */
+    @Transactional(readOnly = true)
     public FeedbackListResponse getAllFeedbacks(int page, int size, String status, String type) {
         log.debug("管理员查询所有反馈, 状态: {}, 类型: {}", status, type);
 
-        Pageable pageable = PageRequest.of(page, size);
-        Page<Feedback> feedbackPage;
+        int validatedPage = PaginationUtil.validatePage(page);
+        int validatedSize = PaginationUtil.validateSize(size);
+        Pageable pageable = PageRequest.of(validatedPage, validatedSize, Sort.by(Sort.Direction.DESC, "createdAt"));
 
-        if (status != null && !status.isEmpty()) {
-            feedbackPage = feedbackRepository.findByStatusOrderByCreatedAtDesc(status, pageable);
-        } else if (type != null && !type.isEmpty()) {
-            feedbackPage = feedbackRepository.findByTypeOrderByCreatedAtDesc(type, pageable);
-        } else {
-            feedbackPage = feedbackRepository.findAllByOrderByCreatedAtDesc(pageable);
-        }
+        Specification<Feedback> spec = buildAdminQuerySpec(status, type);
+        Page<Feedback> feedbackPage = feedbackRepository.findAll(spec, pageable);
 
         List<FeedbackResponse> list = feedbackPage.getContent().stream()
                 .map(FeedbackResponse::fromEntity)
                 .collect(Collectors.toList());
 
         return FeedbackListResponse.of(feedbackPage.getTotalElements(), feedbackPage.getTotalPages(), list);
+    }
+
+    /**
+     * 构建管理员查询的 JPA Specification
+     * 动态组合 status 和 type 筛选条件，两者可同时生效
+     */
+    private Specification<Feedback> buildAdminQuerySpec(String status, String type) {
+        return (root, query, criteriaBuilder) -> {
+            List<Predicate> predicates = new ArrayList<>();
+
+            if (status != null && !status.isEmpty()) {
+                predicates.add(criteriaBuilder.equal(root.get("status"), status));
+            }
+            if (type != null && !type.isEmpty()) {
+                predicates.add(criteriaBuilder.equal(root.get("type"), type));
+            }
+
+            return criteriaBuilder.and(predicates.toArray(new Predicate[0]));
+        };
     }
 
     /**
@@ -183,9 +213,7 @@ public class FeedbackService extends BaseService {
         Feedback feedback = feedbackRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("反馈不存在"));
 
-        feedback.setReply(reply);
-        feedback.setStatus("REPLIED");
-        feedback.setRepliedAt(LocalDateTime.now());
+        feedback.reply(reply);
         feedback = feedbackRepository.save(feedback);
 
         log.info("反馈回复成功, ID: {}", id);
@@ -208,11 +236,8 @@ public class FeedbackService extends BaseService {
         Feedback feedback = feedbackRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("反馈不存在"));
 
-        feedback.setStatus(status);
-        // 状态设为已回复且未设置回复时间时，自动设置回复时间
-        if ("REPLIED".equals(status) && feedback.getRepliedAt() == null) {
-            feedback.setRepliedAt(LocalDateTime.now());
-        }
+        FeedbackStatus feedbackStatus = FeedbackStatus.valueOf(status);
+        feedback.advanceStatus(feedbackStatus);
         feedback = feedbackRepository.save(feedback);
 
         log.info("反馈状态更新成功, ID: {}, 状态: {}", id, status);
@@ -225,6 +250,6 @@ public class FeedbackService extends BaseService {
      * @return 待处理反馈数
      */
     public long getPendingCount() {
-        return feedbackRepository.countByStatus("PENDING");
+        return feedbackRepository.countByStatus(FeedbackStatus.PENDING);
     }
 }

@@ -18,12 +18,14 @@ import org.springframework.data.domain.Pageable;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -108,7 +110,8 @@ class SystemLogServiceTest {
     @DisplayName("获取最新10条日志")
     void getTop10Logs_shouldReturnList() {
         // Given
-        when(systemLogRepository.findTop10ByOrderByCreatedAtDesc()).thenReturn(Arrays.asList(testLog));
+        Page<SystemLog> logPage = new PageImpl<>(Collections.singletonList(testLog));
+        when(systemLogRepository.findTop10ByOrderByCreatedAtDesc(any(Pageable.class))).thenReturn(logPage);
 
         // When
         SystemLogListResponse response = systemLogService.getTop10Logs();
@@ -122,7 +125,8 @@ class SystemLogServiceTest {
     @DisplayName("按用户ID获取最新10条日志")
     void getTop10LogsByUserId_shouldReturnList() {
         // Given
-        when(systemLogRepository.findTop10ByUserIdOrderByCreatedAtDesc(1)).thenReturn(Arrays.asList(testLog));
+        Page<SystemLog> logPage = new PageImpl<>(Collections.singletonList(testLog));
+        when(systemLogRepository.findTop10ByUserIdOrderByCreatedAtDesc(eq(1), any(Pageable.class))).thenReturn(logPage);
 
         // When
         SystemLogListResponse response = systemLogService.getTop10LogsByUserId(1);

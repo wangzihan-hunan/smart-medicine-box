@@ -5,7 +5,6 @@ import com.example.medicinebox.dto.response.BaseResponse;
 import com.example.medicinebox.dto.response.MedicineListResponse;
 import com.example.medicinebox.dto.response.MedicineRecognitionResponse;
 import com.example.medicinebox.dto.response.MedicineResponse;
-import com.example.medicinebox.repository.UserRepository;
 import com.example.medicinebox.service.AIVisionRecognitionService;
 import com.example.medicinebox.service.MedicineRecognitionService;
 import com.example.medicinebox.service.MedicineService;
@@ -13,9 +12,6 @@ import com.example.medicinebox.util.PaginationUtil;
 import javax.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -35,16 +31,13 @@ public class MedicineController {
     private final MedicineService medicineService;
     private final MedicineRecognitionService recognitionService;
     private final AIVisionRecognitionService aiVisionService;
-    private final UserRepository userRepository;
 
     public MedicineController(MedicineService medicineService,
                               MedicineRecognitionService recognitionService,
-                              AIVisionRecognitionService aiVisionService,
-                              UserRepository userRepository) {
+                              AIVisionRecognitionService aiVisionService) {
         this.medicineService = medicineService;
         this.recognitionService = recognitionService;
         this.aiVisionService = aiVisionService;
-        this.userRepository = userRepository;
     }
 
     /**
@@ -185,28 +178,6 @@ public class MedicineController {
     }
 
     /**
-     * 从 SecurityContext 获取当前用户ID
-     * 私有辅助方法，用于获取当前登录用户的ID
-     * 
-     * @return 当前用户ID，若未登录则返回null
-     */
-    private Integer getCurrentUserId() {
-        try {
-            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            if (authentication != null && authentication.getPrincipal() instanceof UserDetails) {
-                UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-                String phone = userDetails.getUsername();
-                return userRepository.findByPhone(phone)
-                        .map(com.example.medicinebox.entity.User::getId)
-                        .orElse(null);
-            }
-        } catch (Exception e) {
-            log.debug("获取当前用户ID失败: {}", e.getMessage());
-        }
-        return null;
-    }
-
-    /**
      * 药品图片识别接口
      * HTTP方法：POST
      * 权限要求：已登录用户
@@ -229,8 +200,8 @@ public class MedicineController {
         log.info("药品识别请求, 文件名: {}, 大小: {} bytes, 识别方式: {}",
                 image.getOriginalFilename(), image.getSize(), method);
 
-        // 获取当前用户ID
-        Integer userId = getCurrentUserId();
+        // 通过 Service 层获取当前用户ID
+        Integer userId = medicineService.getCurrentUserId();
 
         MedicineRecognitionResponse response;
 

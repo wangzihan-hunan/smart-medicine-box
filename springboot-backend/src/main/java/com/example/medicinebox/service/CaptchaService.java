@@ -1,5 +1,6 @@
 package com.example.medicinebox.service;
 
+import com.example.medicinebox.constant.BusinessConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -18,8 +19,6 @@ public class CaptchaService {
 
     // 验证码字符集（仅字母，移除易混淆字符：O、o、I、l）
     private static final String CAPTCHA_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz";
-    // 验证码长度
-    private static final int CAPTCHA_LENGTH = 4;
 
     private final HttpSession session;
 
@@ -35,7 +34,7 @@ public class CaptchaService {
     public String generateCaptcha() {
         StringBuilder sb = new StringBuilder();
         Random random = new Random();
-        for (int i = 0; i < CAPTCHA_LENGTH; i++) {
+        for (int i = 0; i < BusinessConstants.CAPTCHA_LENGTH; i++) {
             sb.append(CAPTCHA_CHARS.charAt(random.nextInt(CAPTCHA_CHARS.length())));
         }
         String captcha = sb.toString();

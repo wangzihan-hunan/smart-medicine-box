@@ -5,9 +5,11 @@ import com.example.medicinebox.dto.response.SystemLogResponse;
 import com.example.medicinebox.entity.SystemLog;
 import com.example.medicinebox.entity.User;
 import com.example.medicinebox.exception.ResourceNotFoundException;
+import com.example.medicinebox.util.PhoneUtils;
 import com.example.medicinebox.repository.SystemLogRepository;
 import com.example.medicinebox.repository.UserRepository;
 import com.example.medicinebox.util.IpUtils;
+import com.example.medicinebox.util.PaginationUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -35,7 +37,6 @@ public class SystemLogService extends BaseService {
     private static final Logger log = LoggerFactory.getLogger(SystemLogService.class);
 
     private final SystemLogRepository systemLogRepository;
-    private final UserRepository userRepository;
 
     /**
      * 构造函数，注入依赖
@@ -44,8 +45,8 @@ public class SystemLogService extends BaseService {
      * @param userRepository 用户数据访问层
      */
     public SystemLogService(SystemLogRepository systemLogRepository, UserRepository userRepository) {
+        super(userRepository);
         this.systemLogRepository = systemLogRepository;
-        this.userRepository = userRepository;
     }
 
     /**
@@ -83,7 +84,7 @@ public class SystemLogService extends BaseService {
         if (user != null) {
             log.setUserId(user.getId());
             log.setUserName(user.getName());
-            log.setUserPhone(maskPhone(user.getPhone()));
+            log.setUserPhone(PhoneUtils.maskPhone(user.getPhone()));
         }
 
         saveLog(log);
@@ -102,7 +103,7 @@ public class SystemLogService extends BaseService {
         log.setModule("用户认证");
         log.setOperation("登录失败");
         log.setDescription("用户登录失败: " + error);
-        log.setUserPhone(maskPhone(phone));
+        log.setUserPhone(PhoneUtils.maskPhone(phone));
         log.setIpAddress(ipAddress);
         log.setSuccess(false);
         log.setErrorMessage(error);
@@ -123,14 +124,14 @@ public class SystemLogService extends BaseService {
         SystemLog log = new SystemLog();
         log.setModule("用户认证");
         log.setOperation("注册");
-        log.setDescription("用户注册: " + maskPhone(phone));
+        log.setDescription("用户注册: " + PhoneUtils.maskPhone(phone));
 
         if (user != null) {
             log.setUserId(user.getId());
             log.setUserName(user.getName());
-            log.setUserPhone(maskPhone(user.getPhone()));
+            log.setUserPhone(PhoneUtils.maskPhone(user.getPhone()));
         } else {
-            log.setUserPhone(maskPhone(phone));
+            log.setUserPhone(PhoneUtils.maskPhone(phone));
         }
 
         saveLog(log);
@@ -179,12 +180,12 @@ public class SystemLogService extends BaseService {
      *
      * @return 系统日志列表响应
      */
+    @Transactional(readOnly = true)
     public SystemLogListResponse getTop10Logs() {
-        List<SystemLog> logs = systemLogRepository.findTop10ByOrderByCreatedAtDesc();
-        List<SystemLogResponse> responseList = logs.stream()
+        Page<SystemLog> page = systemLogRepository.findTop10ByOrderByCreatedAtDesc(PageRequest.of(0, 10));
+        return SystemLogListResponse.of(page.getContent().stream()
                 .map(SystemLogResponse::fromEntity)
-                .collect(Collectors.toList());
-        return SystemLogListResponse.of(responseList);
+                .collect(Collectors.toList()));
     }
 
     /**
@@ -193,12 +194,12 @@ public class SystemLogService extends BaseService {
      * @param userId 用户ID
      * @return 系统日志列表响应
      */
+    @Transactional(readOnly = true)
     public SystemLogListResponse getTop10LogsByUserId(Integer userId) {
-        List<SystemLog> logs = systemLogRepository.findTop10ByUserIdOrderByCreatedAtDesc(userId);
-        List<SystemLogResponse> responseList = logs.stream()
+        Page<SystemLog> page = systemLogRepository.findTop10ByUserIdOrderByCreatedAtDesc(userId, PageRequest.of(0, 10));
+        return SystemLogListResponse.of(page.getContent().stream()
                 .map(SystemLogResponse::fromEntity)
-                .collect(Collectors.toList());
-        return SystemLogListResponse.of(responseList);
+                .collect(Collectors.toList()));
     }
 
     /**
@@ -208,15 +209,11 @@ public class SystemLogService extends BaseService {
      * @param size 每页大小
      * @return 分页系统日志列表响应
      */
+    @Transactional(readOnly = true)
     public SystemLogListResponse getLogs(Integer page, Integer size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Pageable pageable = createPageable(page, size);
         Page<SystemLog> logPage = systemLogRepository.findAll(pageable);
-        
-        List<SystemLogResponse> responseList = logPage.getContent().stream()
-                .map(SystemLogResponse::fromEntity)
-                .collect(Collectors.toList());
-        
-        return new SystemLogListResponse(logPage.getTotalElements(), logPage.getTotalPages(), responseList);
+        return toResponse(logPage);
     }
 
     /**
@@ -227,15 +224,11 @@ public class SystemLogService extends BaseService {
      * @param size 每页大小
      * @return 分页系统日志列表响应
      */
+    @Transactional(readOnly = true)
     public SystemLogListResponse getLogsByModule(String module, Integer page, Integer size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Pageable pageable = createPageable(page, size);
         Page<SystemLog> logPage = systemLogRepository.findByModule(module, pageable);
-
-        List<SystemLogResponse> responseList = logPage.getContent().stream()
-                .map(SystemLogResponse::fromEntity)
-                .collect(Collectors.toList());
-
-        return new SystemLogListResponse(logPage.getTotalElements(), logPage.getTotalPages(), responseList);
+        return toResponse(logPage);
     }
 
     /**
@@ -246,15 +239,11 @@ public class SystemLogService extends BaseService {
      * @param size 每页大小
      * @return 分页系统日志列表响应
      */
+    @Transactional(readOnly = true)
     public SystemLogListResponse getLogsByUserId(Integer userId, Integer page, Integer size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Pageable pageable = createPageable(page, size);
         Page<SystemLog> logPage = systemLogRepository.findByUserId(userId, pageable);
-
-        List<SystemLogResponse> responseList = logPage.getContent().stream()
-                .map(SystemLogResponse::fromEntity)
-                .collect(Collectors.toList());
-
-        return new SystemLogListResponse(logPage.getTotalElements(), logPage.getTotalPages(), responseList);
+        return toResponse(logPage);
     }
 
     /**
@@ -266,15 +255,11 @@ public class SystemLogService extends BaseService {
      * @param size 每页大小
      * @return 分页系统日志列表响应
      */
+    @Transactional(readOnly = true)
     public SystemLogListResponse getLogsByModuleAndUserId(String module, Integer userId, Integer page, Integer size) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Pageable pageable = createPageable(page, size);
         Page<SystemLog> logPage = systemLogRepository.findByModuleAndUserId(module, userId, pageable);
-
-        List<SystemLogResponse> responseList = logPage.getContent().stream()
-                .map(SystemLogResponse::fromEntity)
-                .collect(Collectors.toList());
-
-        return new SystemLogListResponse(logPage.getTotalElements(), logPage.getTotalPages(), responseList);
+        return toResponse(logPage);
     }
 
     /**
@@ -284,6 +269,7 @@ public class SystemLogService extends BaseService {
      * @return 用户实体
      * @throws ResourceNotFoundException 用户不存在时抛出
      */
+    @Transactional(readOnly = true)
     public User getUserByPhone(String phone) {
         return userRepository.findByPhone(phone)
                 .orElseThrow(() -> new ResourceNotFoundException("用户不存在"));
@@ -295,6 +281,7 @@ public class SystemLogService extends BaseService {
      * @param pageable 分页参数
      * @return 系统日志分页结果
      */
+    @Transactional(readOnly = true)
     public Page<SystemLog> findAll(Pageable pageable) {
         return systemLogRepository.findAll(pageable);
     }
@@ -306,6 +293,7 @@ public class SystemLogService extends BaseService {
      * @param pageable 分页参数
      * @return 系统日志分页结果
      */
+    @Transactional(readOnly = true)
     public Page<SystemLog> findByUserId(Integer userId, Pageable pageable) {
         return systemLogRepository.findByUserId(userId, pageable);
     }
@@ -317,6 +305,7 @@ public class SystemLogService extends BaseService {
      * @param pageable 分页参数
      * @return 系统日志分页结果
      */
+    @Transactional(readOnly = true)
     public Page<SystemLog> findByModule(String module, Pageable pageable) {
         return systemLogRepository.findByModule(module, pageable);
     }
@@ -329,6 +318,7 @@ public class SystemLogService extends BaseService {
      * @param pageable 分页参数
      * @return 系统日志分页结果
      */
+    @Transactional(readOnly = true)
     public Page<SystemLog> findByModuleAndUserId(String module, Integer userId, Pageable pageable) {
         return systemLogRepository.findByModuleAndUserId(module, userId, pageable);
     }
@@ -338,6 +328,7 @@ public class SystemLogService extends BaseService {
      *
      * @return 模块名称列表
      */
+    @Transactional(readOnly = true)
     public List<String> findDistinctModules() {
         return systemLogRepository.findDistinctModules();
     }
@@ -347,6 +338,7 @@ public class SystemLogService extends BaseService {
      *
      * @return 日志总数
      */
+    @Transactional(readOnly = true)
     public long countAllLogs() {
         return systemLogRepository.count();
     }
@@ -356,6 +348,7 @@ public class SystemLogService extends BaseService {
      *
      * @return 今日日志数
      */
+    @Transactional(readOnly = true)
     public long countTodayLogs() {
         LocalDateTime today = LocalDateTime.now().toLocalDate().atStartOfDay();
         return systemLogRepository.countByCreatedAtAfter(today);
@@ -366,13 +359,29 @@ public class SystemLogService extends BaseService {
      *
      * @return 失败日志数
      */
+    @Transactional(readOnly = true)
     public long countFailedLogs() {
         return systemLogRepository.countBySuccess(false);
     }
 
-    // 手机号脱敏：保留前3位和后4位，中间用****替换
-    private String maskPhone(String phone) {
-        if (phone == null || phone.length() < 7) return phone;
-        return phone.substring(0, 3) + "****" + phone.substring(phone.length() - 4);
+    // ==================== 私有辅助方法 ====================
+
+    /**
+     * 创建带分页校验和默认排序的Pageable
+     */
+    private Pageable createPageable(Integer page, Integer size) {
+        int validatedPage = PaginationUtil.validatePage(page);
+        int validatedSize = PaginationUtil.validateSize(size);
+        return PageRequest.of(validatedPage, validatedSize, Sort.by(Sort.Direction.DESC, "createdAt"));
+    }
+
+    /**
+     * 将Page&lt;SystemLog&gt;转换为SystemLogListResponse
+     */
+    private SystemLogListResponse toResponse(Page<SystemLog> page) {
+        List<SystemLogResponse> list = page.getContent().stream()
+                .map(SystemLogResponse::fromEntity)
+                .collect(Collectors.toList());
+        return new SystemLogListResponse(page.getTotalElements(), page.getTotalPages(), list);
     }
 }

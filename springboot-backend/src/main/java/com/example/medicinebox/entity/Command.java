@@ -82,4 +82,31 @@ public class Command {
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
     }
+
+    // ==================== 领域方法 ====================
+
+    /** 标记指令为已发送 */
+    public void markSent() {
+        this.status = "已发送";
+    }
+
+    /** 标记指令为已执行 */
+    public void markExecuted() {
+        this.status = "已执行";
+    }
+
+    /** 标记指令为执行失败 */
+    public void markFailed() {
+        this.status = "失败";
+    }
+
+    /** 指令是否处于待执行状态 */
+    public boolean isPending() {
+        return "pending".equals(status);
+    }
+
+    /** 指令是否已执行 */
+    public boolean isExecuted() {
+        return "已执行".equals(status);
+    }
 }

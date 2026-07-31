@@ -71,10 +71,9 @@ public class PrescriptionController {
      * 
      * @param prescriptionId 药方ID
      * @return 操作结果，无返回数据
-     * @throws IOException 文件删除异常
      */
     @DeleteMapping("/{prescriptionId}")
-    public BaseResponse<Void> deletePrescription(@PathVariable Integer prescriptionId) throws IOException {
+    public BaseResponse<Void> deletePrescription(@PathVariable Integer prescriptionId) {
         prescriptionService.deletePrescription(prescriptionId);
         return BaseResponse.success("删除药方成功！");
     }

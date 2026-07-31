@@ -1,5 +1,6 @@
 package com.example.medicinebox.security;
 
+import com.example.medicinebox.constant.UserRole;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
@@ -127,23 +128,39 @@ public class JwtUtil {
         return extractExpiration(token).before(new Date());
     }
 
+    /** JWT claims中角色字段的键名 */
+    private static final String ROLE_CLAIM = "role";
+
     /**
      * 生成JWT token
      *
-     * <p>根据用户手机号生成包含基本声明的JWT token。
+     * <p>根据用户手机号和角色生成包含基本声明的JWT token。
      * token中包含：
      * <ul>
      *   <li>subject: 用户手机号</li>
+     *   <li>role: 用户角色（USER/ADMIN）</li>
      *   <li>issuedAt: token签发时间</li>
      *   <li>expiration: token过期时间</li>
      * </ul>
      *
      * @param phone 用户手机号，作为token的subject
+     * @param role  用户角色（USER/ADMIN）
      * @return 生成的JWT token字符串
      */
-    public String generateToken(String phone) {
+    public String generateToken(String phone, String role) {
         Map<String, Object> claims = new HashMap<>();
+        claims.put(ROLE_CLAIM, role != null ? role : UserRole.USER.name());
         return createToken(claims, phone);
+    }
+
+    /**
+     * 从JWT token中提取用户角色
+     *
+     * @param token JWT token字符串
+     * @return 用户角色，如果token中无角色声明则返回null
+     */
+    public String extractRole(String token) {
+        return extractClaim(token, claims -> claims.get(ROLE_CLAIM, String.class));
     }
 
     /**

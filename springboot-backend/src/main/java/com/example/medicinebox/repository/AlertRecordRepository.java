@@ -1,10 +1,14 @@
 package com.example.medicinebox.repository;
 
+import com.example.medicinebox.constant.AlertStatus;
 import com.example.medicinebox.entity.AlertRecord;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
+
+import java.util.List;
 
 /**
  * 告警记录数据访问接口
@@ -19,7 +23,7 @@ public interface AlertRecordRepository extends JpaRepository<AlertRecord, Long> 
      * @param pageable 分页参数
      * @return 分页告警记录列表
      */
-    Page<AlertRecord> findByStatus(String status, Pageable pageable);
+    Page<AlertRecord> findByStatus(AlertStatus status, Pageable pageable);
 
     /**
      * 根据级别分页查询告警记录
@@ -42,5 +46,17 @@ public interface AlertRecordRepository extends JpaRepository<AlertRecord, Long> 
      * @param status 告警状态
      * @return 告警记录数量
      */
-    long countByStatus(String status);
+    long countByStatus(AlertStatus status);
+
+    /**
+     * 聚合统计告警总数及各状态数量
+     * 一次查询替代四次 countByStatus 调用
+     * @return [total, pending, resolved, ignored]
+     */
+    @Query("SELECT COUNT(a), " +
+           "SUM(CASE WHEN a.status = 'PENDING' THEN 1 ELSE 0 END), " +
+           "SUM(CASE WHEN a.status = 'RESOLVED' THEN 1 ELSE 0 END), " +
+           "SUM(CASE WHEN a.status = 'IGNORED' THEN 1 ELSE 0 END) " +
+           "FROM AlertRecord a")
+    List<Object[]> countStats();
 }

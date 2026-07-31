@@ -2,13 +2,13 @@ package com.example.medicinebox.security;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
+import com.example.medicinebox.util.PhoneUtils;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -16,8 +16,11 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
 
     private static final Logger log = LoggerFactory.getLogger(WebSocketAuthInterceptor.class);
 
-    @Autowired
-    private JwtUtil jwtUtil;
+    private final JwtUtil jwtUtil;
+
+    public WebSocketAuthInterceptor(JwtUtil jwtUtil) {
+        this.jwtUtil = jwtUtil;
+    }
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
@@ -35,7 +38,7 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                     String phone = jwtUtil.extractPhone(token);
                     if (phone != null && jwtUtil.validateToken(token)) {
                         accessor.setUser(new StompPrincipal(phone));
-                        log.debug("WebSocket 认证成功, 用户: {}", maskPhone(phone));
+                        log.debug("WebSocket 认证成功, 用户: {}", PhoneUtils.maskPhone(phone));
                     } else {
                         log.warn("WebSocket 认证失败: token 无效");
                     }
@@ -48,10 +51,5 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
         }
 
         return message;
-    }
-
-    private String maskPhone(String phone) {
-        if (phone == null || phone.length() < 7) return phone;
-        return phone.substring(0, 3) + "****" + phone.substring(phone.length() - 4);
     }
 }

@@ -1,5 +1,6 @@
 package com.example.medicinebox.dto.response;
 
+import com.example.medicinebox.util.PhoneUtils;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -45,20 +46,9 @@ public class UserInfoResponse {
 
     public UserInfoResponse(Integer id, String phone, String name, String role, Boolean phoneVerified) {
         this.id = id;
-        this.phone = maskPhone(phone);
+        this.phone = PhoneUtils.maskPhone(phone);
         this.name = name;
         this.role = role;
         this.phoneVerified = phoneVerified;
-    }
-
-    /**
-     * 手机号脱敏处理
-     * 将手机号中间4位替换为****
-     * @param phone 原始手机号
-     * @return 脱敏后的手机号
-     */
-    private static String maskPhone(String phone) {
-        if (phone == null || phone.length() < 7) return phone;
-        return phone.substring(0, 3) + "****" + phone.substring(phone.length() - 4);
     }
 }

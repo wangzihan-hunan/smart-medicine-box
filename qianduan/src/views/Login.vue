@@ -363,28 +363,20 @@ async function handleLogin() {
       // 获取用户信息
       await authStore.fetchUserInfo()
 
-      // 判断用户角色
-      if (authStore.isAdmin) {
-        // 管理员账号应在管理员入口登录，直接提示并清空状态，不跳转到首页
-        authStore.logout()
-        errors.password = '此账号为管理员账号，请使用管理员登录入口'
+      // 检查是否需要强制修改密码
+      if (response.mustChangePassword) {
+        ElMessage.warning('首次登录请先修改密码')
+        router.push('/profile')
         return
-      } else {
-        // 检查是否需要强制修改密码
-        if (response.mustChangePassword) {
-          ElMessage.warning('首次登录请先修改密码')
-          router.push('/profile')
-          return
-        }
-
-        // 普通用户登录成功，显示欢迎提示
-        const userName = authStore.user?.name || '用户'
-        ElMessage.success(`欢迎回来，${userName}！`)
-        
-        // 跳转到目标页面或首页
-        const redirectPath = route.query.redirect || '/'
-        router.push(redirectPath)
       }
+
+      // 普通用户登录成功，显示欢迎提示
+      const userName = authStore.user?.name || '用户'
+      ElMessage.success(`欢迎回来，${userName}！`)
+      
+      // 跳转到目标页面或首页
+      const redirectPath = route.query.redirect || '/'
+      router.push(redirectPath)
     } else {
       // 登录失败，显示错误信息
       errors.password = '登录失败，请检查账号密码'
@@ -395,10 +387,7 @@ async function handleLogin() {
     const msg = errorData?.message || error.message || '登录失败，请检查网络连接'
     
     // 区分不同错误类型
-    if (msg.includes('权限不足')) {
-      // 管理员账号使用普通入口登录
-      errors.password = '此账号为管理员账号，请使用管理员登录入口'
-    } else if (msg.includes('锁定')) {
+    if (msg.includes('锁定')) {
       // 账号被锁定
       errors.password = msg
     } else if (msg.includes('不存在')) {

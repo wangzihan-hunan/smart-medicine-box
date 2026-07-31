@@ -173,13 +173,7 @@ public class MetricsService {
      * @param type 异常类型
      */
     public void recordBusinessException(String type) {
-        // 按异常类型分别计数（动态创建带标签的计数器）
-        Counter.builder("business.exception")
-                .description("业务异常总数")
-                .tag("type", type)
-                .register(registry)
-                .increment();
-        // 总异常计数
+        registry.counter("business.exception", "type", type).increment();
         businessExceptionCounter.increment();
     }
 

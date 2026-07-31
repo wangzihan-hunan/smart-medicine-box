@@ -7,7 +7,6 @@ import com.example.medicinebox.service.FeedbackService;
 import com.example.medicinebox.util.PaginationUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,8 +23,11 @@ public class FeedbackController {
 
     private static final Logger log = LoggerFactory.getLogger(FeedbackController.class);
 
-    @Autowired
-    private FeedbackService feedbackService;
+    private final FeedbackService feedbackService;
+
+    public FeedbackController(FeedbackService feedbackService) {
+        this.feedbackService = feedbackService;
+    }
 
     /**
      * 提交用户反馈接口

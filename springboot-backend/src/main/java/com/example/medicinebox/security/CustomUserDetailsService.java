@@ -1,5 +1,6 @@
 package com.example.medicinebox.security;
 
+import com.example.medicinebox.constant.UserRole;
 import com.example.medicinebox.entity.User;
 import com.example.medicinebox.repository.UserRepository;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -66,7 +67,7 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .orElseThrow(() -> new UsernameNotFoundException("用户不存在: " + phone));
 
         // 获取用户角色，如果为空则默认为USER
-        String role = user.getRole() != null ? user.getRole() : "USER";
+        String role = user.getRole() != null ? user.getRole().name() : UserRole.USER.name();
         // 构建Spring Security的User对象
         // 包含：用户名（手机号）、密码、授权列表（角色）
         return new org.springframework.security.core.userdetails.User(

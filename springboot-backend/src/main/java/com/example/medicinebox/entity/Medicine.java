@@ -84,4 +84,26 @@ public class Medicine {
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
     }
+
+    // ==================== 领域方法 ====================
+
+    /** 库存是否低于预警阈值 */
+    public boolean isLowStock() {
+        return stock != null && lowStockThreshold != null && stock <= lowStockThreshold;
+    }
+
+    /** 药品是否已过期 */
+    public boolean isExpired() {
+        return expireDate != null && expireDate.isBefore(LocalDateTime.now());
+    }
+
+    /**
+     * 药品是否在指定天数内过期
+     * @param days 天数
+     */
+    public boolean isNearExpiry(int days) {
+        return expireDate != null
+                && expireDate.isAfter(LocalDateTime.now())
+                && expireDate.isBefore(LocalDateTime.now().plusDays(days));
+    }
 }

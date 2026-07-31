@@ -26,6 +26,35 @@ public class MedicineRecognitionService {
 
     private static final Logger logger = LoggerFactory.getLogger(MedicineRecognitionService.class);
 
+    // 药品名称提取正则
+    private static final Pattern NAME_PATTERN_1 = Pattern.compile("药品名称[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NAME_PATTERN_2 = Pattern.compile("药名[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NAME_PATTERN_3 = Pattern.compile("名称[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NAME_PATTERN_4 = Pattern.compile("商品名[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NAME_PATTERN_5 = Pattern.compile("【([^】]+)】", Pattern.CASE_INSENSITIVE);
+
+    // 药品类别提取正则
+    private static final Pattern CATEGORY_PATTERN_1 = Pattern.compile("类别[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CATEGORY_PATTERN_2 = Pattern.compile("分类[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CATEGORY_PATTERN_3 = Pattern.compile("剂型[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CATEGORY_PATTERN_4 = Pattern.compile("类型[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+
+    // 药品规格提取正则
+    private static final Pattern SPEC_PATTERN_1 = Pattern.compile("规格[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SPEC_PATTERN_2 = Pattern.compile("规格型号[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SPEC_PATTERN_3 = Pattern.compile("每片[^\\n]*", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SPEC_PATTERN_4 = Pattern.compile("每粒[^\\n]*", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SPEC_PATTERN_5 = Pattern.compile("每袋[^\\n]*", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SPEC_PATTERN_6 = Pattern.compile("\\d+[mg|g|ml|毫升|克]+.*", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SPEC_PATTERN_7 = Pattern.compile("[0-9.]+\\s*[m]?[gl]\\s*[×x*]\\s*[0-9]+", Pattern.CASE_INSENSITIVE);
+
+    // 生产厂家提取正则
+    private static final Pattern MANUFACTURER_PATTERN_1 = Pattern.compile("生产厂家[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern MANUFACTURER_PATTERN_2 = Pattern.compile("厂家[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern MANUFACTURER_PATTERN_3 = Pattern.compile("生产商[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern MANUFACTURER_PATTERN_4 = Pattern.compile("生产企业[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern MANUFACTURER_PATTERN_5 = Pattern.compile("企业名称[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE);
+
     // Tesseract OCR引擎实例
     private final ITesseract tesseract;
     // Tesseract是否可用（初始化失败时设为false）
@@ -167,11 +196,7 @@ public class MedicineRecognitionService {
     private String extractName(String text) {
         // 策略1：匹配明确的标签格式
         Pattern[] patterns = {
-            Pattern.compile("药品名称[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("药名[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("名称[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("商品名[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("【([^】]+)】", Pattern.CASE_INSENSITIVE)
+            NAME_PATTERN_1, NAME_PATTERN_2, NAME_PATTERN_3, NAME_PATTERN_4, NAME_PATTERN_5
         };
 
         for (Pattern pattern : patterns) {
@@ -206,10 +231,7 @@ public class MedicineRecognitionService {
      */
     private String extractCategory(String text) {
         Pattern[] patterns = {
-            Pattern.compile("类别[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("分类[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("剂型[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("类型[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE)
+            CATEGORY_PATTERN_1, CATEGORY_PATTERN_2, CATEGORY_PATTERN_3, CATEGORY_PATTERN_4
         };
 
         for (Pattern pattern : patterns) {
@@ -231,13 +253,8 @@ public class MedicineRecognitionService {
      */
     private String extractSpec(String text) {
         Pattern[] patterns = {
-            Pattern.compile("规格[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("规格型号[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("每片[^\\n]*", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("每粒[^\\n]*", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("每袋[^\\n]*", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("\\d+[mg|g|ml|毫升|克]+.*", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("[0-9.]+\\s*[m]?[gl]\\s*[×x*]\\s*[0-9]+", Pattern.CASE_INSENSITIVE)
+            SPEC_PATTERN_1, SPEC_PATTERN_2, SPEC_PATTERN_3, SPEC_PATTERN_4,
+            SPEC_PATTERN_5, SPEC_PATTERN_6, SPEC_PATTERN_7
         };
 
         for (Pattern pattern : patterns) {
@@ -262,11 +279,8 @@ public class MedicineRecognitionService {
      */
     private String extractManufacturer(String text) {
         Pattern[] patterns = {
-            Pattern.compile("生产厂家[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("厂家[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("生产商[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("生产企业[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("企业名称[：:]\\s*([^\\n]+)", Pattern.CASE_INSENSITIVE)
+            MANUFACTURER_PATTERN_1, MANUFACTURER_PATTERN_2, MANUFACTURER_PATTERN_3,
+            MANUFACTURER_PATTERN_4, MANUFACTURER_PATTERN_5
         };
 
         for (Pattern pattern : patterns) {

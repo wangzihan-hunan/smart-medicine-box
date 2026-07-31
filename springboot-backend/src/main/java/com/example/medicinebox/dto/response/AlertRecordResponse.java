@@ -52,7 +52,7 @@ public class AlertRecordResponse {
         response.setContent(entity.getContent());
         response.setMetricValue(entity.getMetricValue());
         response.setThresholdValue(entity.getThresholdValue());
-        response.setStatus(entity.getStatus());
+        response.setStatus(entity.getStatus().name());
         response.setHandledBy(entity.getHandledBy());
         response.setHandledAt(entity.getHandledAt());
         response.setHandleRemark(entity.getHandleRemark());

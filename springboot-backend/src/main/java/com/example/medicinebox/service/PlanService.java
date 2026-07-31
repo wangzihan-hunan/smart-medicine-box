@@ -1,5 +1,7 @@
 package com.example.medicinebox.service;
 
+import com.example.medicinebox.constant.BusinessConstants;
+import com.example.medicinebox.constant.UserPlan;
 import com.example.medicinebox.entity.User;
 import com.example.medicinebox.enums.PlanType;
 import com.example.medicinebox.repository.UserRepository;
@@ -15,7 +17,7 @@ import java.time.LocalDateTime;
  * 核心功能：套餐类型查询、套餐有效性校验、AI识别用量管理、套餐升级、月度用量重置等
  */
 @Service
-public class PlanService {
+public class PlanService extends BaseService {
 
     private static final Logger log = LoggerFactory.getLogger(PlanService.class);
 
@@ -27,7 +29,18 @@ public class PlanService {
      * @param userRepository 用户数据访问层
      */
     public PlanService(UserRepository userRepository) {
+        super(userRepository);
         this.userRepository = userRepository;
+    }
+
+    /**
+     * 获取当前登录用户ID
+     * 从Spring Security上下文中获取当前用户的ID
+     *
+     * @return 当前用户ID
+     */
+    public Integer getCurrentUserId() {
+        return getCurrentUser().getId();
     }
 
     /**
@@ -41,7 +54,7 @@ public class PlanService {
         if (user == null) {
             return PlanType.FREE;
         }
-        return PlanType.fromString(user.getPlan());
+        return PlanType.valueOf(user.getPlan().name());
     }
 
     /**
@@ -56,7 +69,7 @@ public class PlanService {
         if (user == null) {
             return false;
         }
-        if ("FREE".equals(user.getPlan())) {
+        if (UserPlan.FREE == user.getPlan()) {
             return true; // 免费版永久有效
         }
         if (user.getPlanExpireAt() == null) {
@@ -81,7 +94,7 @@ public class PlanService {
         // Reset monthly count if needed
         resetMonthlyCountIfNeeded(user);
 
-        PlanType plan = PlanType.fromString(user.getPlan());
+        PlanType plan = PlanType.valueOf(user.getPlan().name());
         if (plan == PlanType.PROFESSIONAL && hasActivePlan(userId)) {
             return true; // Unlimited for pro
         }
@@ -105,7 +118,7 @@ public class PlanService {
         // 跨月时重置月度计数
         resetMonthlyCountIfNeeded(user);
 
-        PlanType plan = PlanType.fromString(user.getPlan());
+        PlanType plan = PlanType.valueOf(user.getPlan().name());
         // 专业版且套餐有效则不限次数
         if (plan == PlanType.PROFESSIONAL && hasActivePlan(userId)) {
             return Integer.MAX_VALUE;
@@ -130,7 +143,7 @@ public class PlanService {
 
         resetMonthlyCountIfNeeded(user);
 
-        PlanType plan = PlanType.fromString(user.getPlan());
+        PlanType plan = PlanType.valueOf(user.getPlan().name());
         if (plan == PlanType.PROFESSIONAL && hasActivePlan(userId)) {
             log.debug("User {} is on PRO plan, unlimited AI recognition", userId);
             return true;
@@ -169,7 +182,7 @@ public class PlanService {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime expireAt = now.plusMonths(months);
 
-        user.setPlan(planType.name());
+        user.setPlan(UserPlan.valueOf(planType.name()));
         user.setPlanExpireAt(expireAt);
         user.setMonthAiLimit(planType.getAiRecognitionLimit());
         user.setMonthAiCount(0);
@@ -218,18 +231,18 @@ public class PlanService {
         // 跨月时重置月度计数
         resetMonthlyCountIfNeeded(user);
 
-        PlanType plan = PlanType.fromString(user.getPlan());
+        PlanType plan = PlanType.valueOf(user.getPlan().name());
         PlanInfo info = new PlanInfo();
         info.setPlan(plan.name());
         info.setPlanName(plan.getDisplayName());
         info.setActive(hasActivePlan(userId));
         info.setExpireAt(user.getPlanExpireAt());
         // 无限额用-1表示
-        info.setAiLimit(plan.getAiRecognitionLimit() == Integer.MAX_VALUE ? -1 : plan.getAiRecognitionLimit());
+        info.setAiLimit(plan.getAiRecognitionLimit() == Integer.MAX_VALUE ? BusinessConstants.UNLIMITED : plan.getAiRecognitionLimit());
         info.setAiUsed(user.getMonthAiCount());
         info.setAiRemaining(getRemainingAiCount(userId));
-        info.setMedicineLimit(plan.getMedicineLimit() == Integer.MAX_VALUE ? -1 : plan.getMedicineLimit());
-        info.setReminderLimit(plan.getReminderLimit() == Integer.MAX_VALUE ? -1 : plan.getReminderLimit());
+        info.setMedicineLimit(plan.getMedicineLimit() == Integer.MAX_VALUE ? BusinessConstants.UNLIMITED : plan.getMedicineLimit());
+        info.setReminderLimit(plan.getReminderLimit() == Integer.MAX_VALUE ? BusinessConstants.UNLIMITED : plan.getReminderLimit());
 
         return info;
     }

@@ -1,15 +1,10 @@
 package com.example.medicinebox.controller;
 
 import com.example.medicinebox.dto.response.BaseResponse;
-import com.example.medicinebox.entity.User;
 import com.example.medicinebox.enums.PlanType;
-import com.example.medicinebox.repository.UserRepository;
 import com.example.medicinebox.service.PlanService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -27,11 +22,9 @@ public class PlanController {
     private static final Logger log = LoggerFactory.getLogger(PlanController.class);
 
     private final PlanService planService;
-    private final UserRepository userRepository;
 
-    public PlanController(PlanService planService, UserRepository userRepository) {
+    public PlanController(PlanService planService) {
         this.planService = planService;
-        this.userRepository = userRepository;
     }
 
     /**
@@ -43,7 +36,7 @@ public class PlanController {
      */
     @GetMapping("/my")
     public BaseResponse<PlanService.PlanInfo> getMyPlan() {
-        Integer userId = getCurrentUserId();
+        Integer userId = planService.getCurrentUserId();
         if (userId == null) {
             return BaseResponse.error(401, "请先登录");
         }
@@ -112,7 +105,7 @@ public class PlanController {
     @PostMapping("/upgrade")
     public BaseResponse<Void> upgradePlan(@RequestParam("plan") String plan,
                                           @RequestParam(value = "months", defaultValue = "1") int months) {
-        Integer userId = getCurrentUserId();
+        Integer userId = planService.getCurrentUserId();
         if (userId == null) {
             return BaseResponse.error(401, "请先登录");
         }
@@ -125,27 +118,5 @@ public class PlanController {
         } catch (IllegalArgumentException e) {
             return BaseResponse.error(400, e.getMessage());
         }
-    }
-
-    /**
-     * 获取当前登录用户ID
-     * 私有辅助方法，从SecurityContext中获取当前登录用户的ID
-     * 
-     * @return 当前用户ID，若未登录则返回null
-     */
-    private Integer getCurrentUserId() {
-        try {
-            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            if (authentication != null && authentication.getPrincipal() instanceof UserDetails) {
-                UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-                String phone = userDetails.getUsername();
-                return userRepository.findByPhone(phone)
-                        .map(User::getId)
-                        .orElse(null);
-            }
-        } catch (Exception e) {
-            log.debug("获取当前用户ID失败: {}", e.getMessage());
-        }
-        return null;
     }
 }

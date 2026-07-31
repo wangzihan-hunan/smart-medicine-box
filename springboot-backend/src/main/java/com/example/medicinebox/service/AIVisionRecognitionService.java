@@ -35,8 +35,8 @@ public class AIVisionRecognitionService {
     // 阿里云百炼多模态生成API地址
     private static final String API_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
 
-    // API密钥（配置项：ai.qwen.api-key）
-    @Value("${ai.qwen.api-key:}")
+    // API密钥，优先使用配置文件，回退到环境变量 AI_QWEN_API_KEY
+    @Value("${ai.qwen.api-key:${AI_QWEN_API_KEY:}}")
     private String apiKey;
 
     // 使用的模型名称（配置项：ai.qwen.model，默认qwen-vl-max）
@@ -155,20 +155,23 @@ public class AIVisionRecognitionService {
             // 2. 构造请求体
             String requestBody = buildRequestBody(base64Image, mimeType);
 
-            // 3. 调用 API
-            String responseBody = callApi(requestBody);
+            // 3. 调用 API + 扣减用量
+            // finally 块确保无论 API 调用成功/失败/网络异常，都扣减用量
+            String responseBody;
+            try {
+                responseBody = callApi(requestBody);
+            } finally {
+                if (userId != null) {
+                    planService.consumeAiRecognition(userId);
+                }
+            }
 
             // 4. 解析响应
             MedicineRecognitionResponse result = parseResponse(responseBody);
 
-            // 5. 扣减套餐用量（仅在识别成功时）
-            if (result.isSuccess() && userId != null) {
-                planService.consumeAiRecognition(userId);
-            }
-
             long cost = System.currentTimeMillis() - startTime;
-            log.info("AI 识别完成, 用户: {}, 耗时: {}ms, 识别到 {} 种药品", userId, cost,
-                    result.getMedicines() != null ? result.getMedicines().size() : 0);
+            log.info("AI 识别完成, 用户: {}, 耗时: {}ms, 识别到 {} 种药品, 成功: {}", userId, cost,
+                    result.getMedicines() != null ? result.getMedicines().size() : 0, result.isSuccess());
 
             return result;
 

@@ -15,6 +15,19 @@ spring:
       max-lifetime: 1800000
       pool-name: MedicineBoxHikariCP
 
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+    database: ${REDIS_DATABASE:0}
+    timeout: 3000ms
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+        max-wait: -1ms
+
   jpa:
     hibernate:
       ddl-auto: update
@@ -45,11 +58,20 @@ jwt:
   secret: ${JWT_SECRET:please-change-this-secret-in-production}
   expiration: ${JWT_EXPIRATION:604800000}
 
+# 认证安全配置
+auth:
+  max-login-attempts: ${AUTH_MAX_LOGIN_ATTEMPTS:5}
+  lock-duration-minutes: ${AUTH_LOCK_DURATION_MINUTES:30}
+  captcha-expire-minutes: ${AUTH_CAPTCHA_EXPIRE_MINUTES:5}
+  captcha-send-interval-seconds: ${AUTH_CAPTCHA_SEND_INTERVAL_SECONDS:60}
+  captcha-length: ${AUTH_CAPTCHA_LENGTH:4}
+  default-ai-limit: ${AUTH_DEFAULT_AI_LIMIT:10}
+
 file:
   upload-dir: ${UPLOAD_DIR:./static/uploads/}
 
 cors:
-  allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3002}
+  allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3002,http://localhost:3003,http://localhost:3004}
 
 # AI 视觉识别配置（阿里百炼通义千问）
 ai:
