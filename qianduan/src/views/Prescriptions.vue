@@ -3,14 +3,21 @@
   <!-- 药方上传页面主容器 -->
   <div class="prescriptions-page">
     <div class="page-container">
-      <!-- 页面头部：标题和上传按钮 -->
+      <!-- 页面头部：标题和操作按钮 -->
       <div class="page-header">
         <h2 class="section-title">药方上传</h2>
-        <!-- 上传药方按钮：点击打开上传弹窗 -->
-        <button class="btn-primary" @click="showUploadModal = true">
-          <el-icon><Upload /></el-icon>
-          <span>上传药方</span>
-        </button>
+        <div class="header-actions">
+          <!-- 智能识别按钮 -->
+          <button class="btn-accent" @click="openSmartRecognition">
+            <el-icon><Camera /></el-icon>
+            <span>智能识别</span>
+          </button>
+          <!-- 上传药方按钮 -->
+          <button class="btn-primary" @click="showUploadModal = true">
+            <el-icon><Upload /></el-icon>
+            <span>上传药方</span>
+          </button>
+        </div>
       </div>
       
       <!-- 加载中状态 -->
@@ -156,18 +163,165 @@
         <button class="btn-primary" @click="handleEdit">保存</button>
       </template>
     </el-dialog>
+
+    <!-- 智能识别弹窗 -->
+    <el-dialog
+      title="智能识别药品"
+      v-model="showSmartRecognition"
+      width="720px"
+      :close-on-click-modal="false"
+      @closed="closeSmartRecognition"
+    >
+      <!-- 步骤1：选择识别方式 -->
+      <div v-if="smartStep === 1" class="smart-step">
+        <div class="smart-methods">
+          <!-- 图片识别 -->
+          <div class="method-card" @click="handleImageRecognition">
+            <el-icon class="method-icon"><Picture /></el-icon>
+            <div class="method-title">拍照/图片识别</div>
+            <div class="method-desc">上传药品包装或药方照片，自动识别药品信息</div>
+          </div>
+          <!-- 条形码扫描 -->
+          <div class="method-card" @click="startBarcodeScan">
+            <el-icon class="method-icon"><Camera /></el-icon>
+            <div class="method-title">条形码扫描</div>
+            <div class="method-desc">扫描药品包装上的条形码，快速识别药品</div>
+          </div>
+        </div>
+        <!-- 隐藏的文件输入框 -->
+        <input
+          type="file"
+          ref="smartFileInput"
+          class="hidden-input"
+          accept=".jpg,.jpeg,.png,.bmp"
+          @change="handleSmartFileSelect"
+        />
+      </div>
+
+      <!-- 步骤2：条形码扫描 -->
+      <div v-else-if="smartStep === 2" class="smart-step">
+        <BarcodeScanner
+          v-if="showBarcodeScanner"
+          @scan-result="handleBarcodeResult"
+          @close="smartStep = 1"
+          @error="handleScannerError"
+        />
+      </div>
+
+      <!-- 步骤3：识别结果 -->
+      <div v-else-if="smartStep === 3" class="smart-step">
+        <!-- 加载中 -->
+        <div v-if="recognizing" class="recognizing-state">
+          <div class="spinner"></div>
+          <span>正在识别中...</span>
+        </div>
+
+        <!-- 识别失败 -->
+        <div v-else-if="recognitionError" class="recognition-error">
+          <el-icon class="error-icon"><WarningFilled /></el-icon>
+          <div class="error-text">{{ recognitionError }}</div>
+          <button class="btn-primary" @click="resetRecognition">重新识别</button>
+        </div>
+
+        <!-- 识别结果展示 -->
+        <div v-else-if="matchResults.length > 0" class="match-results">
+          <div class="match-summary">
+            识别到 <strong>{{ matchResults.length }}</strong> 种药品，
+            匹配到 <strong>{{ matchedCount }}</strong> 种已有药品
+          </div>
+
+          <div class="match-list">
+            <div
+              v-for="(item, index) in matchResults"
+              :key="index"
+              class="match-item"
+              :class="{ matched: item.matched, unmatched: !item.matched, skipped: item.skip }"
+            >
+              <div class="match-info">
+                <div class="match-name">
+                  {{ item.recognizedInfo?.name || '未知药品' }}
+                  <span v-if="item.recognizedInfo?.spec" class="match-spec">{{ item.recognizedInfo.spec }}</span>
+                </div>
+                <div v-if="item.matched" class="match-detail">
+                  <el-icon class="match-icon"><CircleCheck /></el-icon>
+                  匹配到：
+                  <strong>{{ item.matchedMedicine?.name }}</strong>
+                  <span v-if="item.matchedMedicine?.spec" class="match-existing-spec">
+                    ({{ item.matchedMedicine.spec }})
+                  </span>
+                  <span class="match-similarity">
+                    相似度 {{ (item.similarity * 100).toFixed(0) }}%
+                  </span>
+                  <span class="confidence-tag" :class="item.confidence">
+                    {{ item.confidence === 'HIGH' ? '高置信' : '中置信' }}
+                  </span>
+                </div>
+                <div v-else class="match-detail unmatched-detail">
+                  <el-icon class="match-icon"><Warning /></el-icon>
+                  未匹配到已有药品，将作为新药品入库
+                </div>
+              </div>
+              <div class="match-actions">
+                <select v-model="item.quantity" class="quantity-select" v-if="!item.skip">
+                  <option :value="1">+1</option>
+                  <option :value="2">+2</option>
+                  <option :value="3">+3</option>
+                  <option :value="5">+5</option>
+                  <option :value="10">+10</option>
+                </select>
+                <button
+                  class="action-btn-small skip-btn"
+                  @click="item.skip = !item.skip"
+                  :class="{ active: item.skip }"
+                >
+                  {{ item.skip ? '已跳过' : '跳过' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="batch-actions">
+            <button class="btn-secondary" @click="resetRecognition">重新识别</button>
+            <button
+              class="btn-primary"
+              @click="handleBatchAdd"
+              :disabled="allSkipped"
+            >
+              一键入库 ({{ toAddCount }}种)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 步骤4：入库结果 -->
+      <div v-else-if="smartStep === 4" class="smart-step">
+        <div class="batch-result">
+          <el-icon class="result-icon success"><CircleCheckFilled /></el-icon>
+          <div class="result-title">入库完成</div>
+          <div class="result-detail">
+            新增 <strong>{{ batchResult.newCount }}</strong> 种药品，
+            更新 <strong>{{ batchResult.updateCount }}</strong> 种库存
+            <span v-if="batchResult.skipCount > 0">，跳过 {{ batchResult.skipCount }} 种</span>
+          </div>
+          <button class="btn-primary" @click="finishRecognition">完成</button>
+        </div>
+      </div>
+    </el-dialog>
+
   </div>
 </template>
 
 <script setup>
 // 引入Vue核心API：响应式引用、响应式对象、生命周期钩子
-import { ref, reactive, onMounted, onActivated } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated } from 'vue'
 // 引入Element Plus消息提示和确认对话框组件
 import { ElMessage, ElMessageBox } from 'element-plus'
 // 引入药方相关的API接口
-import { prescriptionAPI } from '../utils/api'
+import { prescriptionAPI, medicineAPI } from '../utils/api'
 // 引入Element Plus图标组件
-import { Upload, Document, View, Edit, Delete, FolderOpened } from '@element-plus/icons-vue'
+import { Upload, Document, View, Edit, Delete, FolderOpened, Camera, Picture, CircleCheck, Warning, WarningFilled, CircleCheckFilled } from '@element-plus/icons-vue'
+// 引入条形码扫描组件
+import BarcodeScanner from '../components/BarcodeScanner.vue'
 // 引入dayjs日期处理库
 import dayjs from 'dayjs'
 
@@ -203,6 +357,188 @@ const editForm = reactive({
   diagnosis: '',
   dosageInstructions: ''
 })
+
+// ==================== 智能识别相关状态 ====================
+
+// 智能识别弹窗显示状态
+const showSmartRecognition = ref(false)
+// 智能识别步骤：1-选择方式, 2-条形码扫描, 3-识别结果, 4-入库结果
+const smartStep = ref(1)
+// 是否显示条形码扫描组件
+const showBarcodeScanner = ref(false)
+// 是否正在识别中
+const recognizing = ref(false)
+// 识别错误信息
+const recognitionError = ref('')
+// 匹配结果列表
+const matchResults = ref([])
+// 批量入库结果
+const batchResult = ref({ newCount: 0, updateCount: 0, skipCount: 0 })
+// 隐藏文件输入框引用
+const smartFileInput = ref(null)
+
+// 计算属性：匹配到的数量
+const matchedCount = computed(() => matchResults.value.filter(r => r.matched).length)
+
+// 计算属性：待入库数量
+const toAddCount = computed(() => matchResults.value.filter(r => !r.skip).length)
+
+// 计算属性：是否全部跳过
+const allSkipped = computed(() => matchResults.value.length > 0 && toAddCount.value === 0)
+
+// 打开智能识别弹窗
+function openSmartRecognition() {
+  showSmartRecognition.value = true
+  smartStep.value = 1
+  recognitionError.value = ''
+}
+
+// 关闭智能识别弹窗并重置
+function closeSmartRecognition() {
+  showSmartRecognition.value = false
+  resetRecognition()
+}
+
+// 触发图片识别文件选择
+function handleImageRecognition() {
+  smartFileInput.value?.click()
+}
+
+// 启动条形码扫描
+function startBarcodeScan() {
+  smartStep.value = 2
+  showBarcodeScanner.value = true
+}
+
+// 处理智能识别文件选择
+async function handleSmartFileSelect(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  recognizing.value = true
+  smartStep.value = 3
+  recognitionError.value = ''
+
+  try {
+    const formData = new FormData()
+    formData.append('image', file)
+
+    // 步骤1：调用 OCR 识别
+    const recognitionResult = await medicineAPI.recognize(formData)
+    if (!recognitionResult || !recognitionResult.success) {
+      recognitionError.value = recognitionResult?.message || '识别失败，请尝试重新上传'
+      recognizing.value = false
+      return
+    }
+
+    // 步骤2：调用智能匹配
+    const matchResult = await medicineAPI.match(recognitionResult)
+    matchResults.value = (matchResult || []).map(item => ({
+      ...item,
+      quantity: 1,
+      skip: false
+    }))
+
+    recognizing.value = false
+  } catch (error) {
+    console.error('智能识别失败:', error)
+    recognitionError.value = error.message || '识别服务暂不可用，请稍后重试'
+    recognizing.value = false
+  } finally {
+    // 重置文件输入框
+    if (smartFileInput.value) {
+      smartFileInput.value.value = ''
+    }
+  }
+}
+
+// 处理条形码扫描结果
+async function handleBarcodeResult(result) {
+  showBarcodeScanner.value = false
+  smartStep.value = 3
+  recognizing.value = true
+  recognitionError.value = ''
+
+  try {
+    // 条形码识别：将条形码作为药品名称，先尝试匹配
+    const recognitionResult = {
+      success: true,
+      medicines: [{
+        name: result.barcode,
+        spec: '',
+        dosage: '',
+        frequency: '',
+        quantity: '1'
+      }]
+    }
+
+    const matchResult = await medicineAPI.match(recognitionResult)
+    matchResults.value = (matchResult || []).map(item => ({
+      ...item,
+      quantity: 1,
+      skip: false
+    }))
+
+    recognizing.value = false
+  } catch (error) {
+    console.error('条形码匹配失败:', error)
+    recognitionError.value = '条形码匹配失败，请尝试图片识别'
+    recognizing.value = false
+  }
+}
+
+// 处理扫描器错误
+function handleScannerError(msg) {
+  ElMessage.warning(msg || '扫描失败')
+  smartStep.value = 1
+}
+
+// 批量入库
+async function handleBatchAdd() {
+  const items = matchResults.value
+    .filter(item => !item.skip)
+    .map(item => ({
+      name: item.recognizedInfo?.name || '',
+      spec: item.recognizedInfo?.spec || '',
+      category: item.recognizedInfo?.category || '',
+      manufacturer: item.recognizedInfo?.manufacturer || '',
+      quantity: item.quantity || 1,
+      matchedMedicineId: item.matched ? item.matchedMedicine?.id : null
+    }))
+
+  if (items.length === 0) {
+    ElMessage.warning('请选择要入库的药品')
+    return
+  }
+
+  try {
+    const result = await medicineAPI.batchAdd(items)
+    batchResult.value = result
+    smartStep.value = 4
+    ElMessage.success('入库成功')
+  } catch (error) {
+    console.error('批量入库失败:', error)
+    ElMessage.error(error.message || '入库失败')
+  }
+}
+
+// 重置识别状态
+function resetRecognition() {
+  smartStep.value = 1
+  recognizing.value = false
+  recognitionError.value = ''
+  matchResults.value = []
+  showBarcodeScanner.value = false
+}
+
+// 完成识别，关闭弹窗并刷新列表
+function finishRecognition() {
+  showSmartRecognition.value = false
+  resetRecognition()
+  fetchPrescriptions()
+}
+
+// ==================== 药方列表相关方法 ====================
 
 // 获取药方列表数据
 async function fetchPrescriptions() {
@@ -764,5 +1100,307 @@ onActivated(() => {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+/* ==================== 智能识别样式 ==================== */
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.btn-accent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 500;
+  transition: all var(--transition-normal);
+}
+
+.btn-accent:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.smart-step {
+  min-height: 200px;
+}
+
+.smart-methods {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.method-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 20px;
+  border: 2px solid var(--border-color);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  text-align: center;
+}
+
+.method-card:hover {
+  border-color: #667eea;
+  background: rgba(102, 126, 234, 0.04);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.1);
+}
+
+.method-icon {
+  font-size: 48px;
+  color: #667eea;
+  margin-bottom: 16px;
+}
+
+.method-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.method-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.recognizing-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 20px;
+  gap: 16px;
+  color: var(--text-secondary);
+}
+
+.recognition-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px;
+  gap: 16px;
+}
+
+.error-icon {
+  font-size: 48px;
+  color: var(--danger-color);
+}
+
+.error-text {
+  font-size: 15px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.match-results {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.match-summary {
+  font-size: 14px;
+  color: var(--text-secondary);
+  padding: 12px 16px;
+  background: rgba(102, 126, 234, 0.06);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.match-summary strong {
+  color: #667eea;
+}
+
+.match-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.match-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  transition: all var(--transition-fast);
+}
+
+.match-item.matched {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.04);
+}
+
+.match-item.unmatched {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.match-item.skipped {
+  opacity: 0.5;
+}
+
+.match-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.match-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.match-spec {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.match-detail {
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.match-icon {
+  font-size: 16px;
+}
+
+.match-item.matched .match-icon {
+  color: var(--success-color);
+}
+
+.match-item.unmatched .match-icon {
+  color: var(--warning-color);
+}
+
+.match-existing-spec {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.match-similarity {
+  font-size: 12px;
+  color: #667eea;
+  background: rgba(102, 126, 234, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.confidence-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.confidence-tag.HIGH {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success-color);
+}
+
+.confidence-tag.MEDIUM {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning-color);
+}
+
+.match-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.quantity-select {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+  cursor: pointer;
+}
+
+.action-btn-small {
+  padding: 6px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  background: white;
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.action-btn-small:hover {
+  border-color: var(--text-muted);
+}
+
+.action-btn-small.active {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger-color);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.batch-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.batch-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px;
+  gap: 12px;
+  text-align: center;
+}
+
+.result-icon {
+  font-size: 56px;
+}
+
+.result-icon.success {
+  color: var(--success-color);
+}
+
+.result-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.result-detail {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.result-detail strong {
+  color: #667eea;
+  font-size: 18px;
 }
 </style>

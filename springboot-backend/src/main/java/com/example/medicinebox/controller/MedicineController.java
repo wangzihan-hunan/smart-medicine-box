@@ -6,6 +6,7 @@ import com.example.medicinebox.dto.response.MedicineListResponse;
 import com.example.medicinebox.dto.response.MedicineRecognitionResponse;
 import com.example.medicinebox.dto.response.MedicineResponse;
 import com.example.medicinebox.service.AIVisionRecognitionService;
+import com.example.medicinebox.service.MedicineMatchingService;
 import com.example.medicinebox.service.MedicineRecognitionService;
 import com.example.medicinebox.service.MedicineService;
 import com.example.medicinebox.util.PaginationUtil;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 药品管理控制器
@@ -31,13 +33,16 @@ public class MedicineController {
     private final MedicineService medicineService;
     private final MedicineRecognitionService recognitionService;
     private final AIVisionRecognitionService aiVisionService;
+    private final MedicineMatchingService matchingService;
 
     public MedicineController(MedicineService medicineService,
                               MedicineRecognitionService recognitionService,
-                              AIVisionRecognitionService aiVisionService) {
+                              AIVisionRecognitionService aiVisionService,
+                              MedicineMatchingService matchingService) {
         this.medicineService = medicineService;
         this.recognitionService = recognitionService;
         this.aiVisionService = aiVisionService;
+        this.matchingService = matchingService;
     }
 
     /**
@@ -228,6 +233,55 @@ public class MedicineController {
             log.warn("药品识别失败: {}", response.getMessage());
             return BaseResponse.error(400, response.getMessage());
         }
+    }
+
+    /**
+     * 药品识别结果匹配接口
+     * 将识别到的药品列表与数据库中已有药品进行模糊匹配
+     * HTTP方法：POST
+     * 权限要求：已登录用户
+     *
+     * @param recognitionResult 识别结果（来自 OCR 或 AI 识别）
+     * @return 匹配结果列表，包含识别信息和匹配到的数据库药品
+     */
+    @PostMapping("/match")
+    public BaseResponse<List<MedicineMatchingService.MedicineMatchResult>> matchMedicines(
+            @RequestBody MedicineRecognitionResponse recognitionResult) {
+        log.info("药品匹配请求, 识别药品数: {}",
+                recognitionResult.getMedicines() != null ? recognitionResult.getMedicines().size() : 0);
+
+        List<MedicineMatchingService.MedicineMatchResult> matchResults =
+                matchingService.matchRecognitionResults(recognitionResult);
+
+        long matchedCount = matchResults.stream().filter(MedicineMatchingService.MedicineMatchResult::isMatched).count();
+        log.info("药品匹配完成, 总药品: {}, 匹配: {}", matchResults.size(), matchedCount);
+
+        return BaseResponse.success("匹配完成", matchResults);
+    }
+
+    /**
+     * 批量入库接口
+     * 将匹配确认后的药品批量保存到数据库（新增或更新库存）
+     * HTTP方法：POST
+     * 权限要求：已登录用户
+     *
+     * @param items 待入库的药品列表
+     * @return 入库结果（新增/更新/跳过数量）
+     */
+    @PostMapping("/batch-add")
+    public BaseResponse<MedicineMatchingService.BatchAddResult> batchAddMedicines(
+            @RequestBody List<MedicineMatchingService.BatchAddItem> items) {
+        log.info("批量入库请求, 药品数: {}", items != null ? items.size() : 0);
+
+        if (items == null || items.isEmpty()) {
+            return BaseResponse.error(400, "请选择要入库的药品");
+        }
+
+        MedicineMatchingService.BatchAddResult result = matchingService.batchAddMedicines(items);
+        log.info("批量入库完成, 新增: {}, 更新: {}, 跳过: {}",
+                result.getNewCount(), result.getUpdateCount(), result.getSkipCount());
+
+        return BaseResponse.success("入库完成", result);
     }
 
     /**

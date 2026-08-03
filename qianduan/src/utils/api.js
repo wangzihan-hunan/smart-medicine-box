@@ -430,7 +430,15 @@ export const medicineAPI = {
   getLowStock: () => instance.get('/medicines/low-stock'),
   /** 获取已过期的药品
    * @returns {Promise<Object>} */
-  getExpired: () => instance.get('/medicines/expired')
+  getExpired: () => instance.get('/medicines/expired'),
+  /** 药品识别结果匹配（模糊匹配数据库已有药品）
+   * @param {Object} recognitionResult - 识别结果
+   * @returns {Promise<Object>} */
+  match: (recognitionResult) => instance.post('/medicines/match', recognitionResult),
+  /** 批量入库（新增或更新库存）
+   * @param {Array} items - 待入库药品列表
+   * @returns {Promise<Object>} */
+  batchAdd: (items) => instance.post('/medicines/batch-add', items)
 }
 
 // ==================== 提醒 API ====================

@@ -175,14 +175,21 @@ smart-medicine-box/
 
 ## 可选配置
 
-### AI 视觉识别（阿里百炼通义千问）
+### AI 视觉识别（Kimi 月之暗面 Vision API）
 
-此功能默认关闭。如需启用，设置环境变量：
+此功能默认关闭。如需启用，先在 [Kimi 开放平台](https://platform.moonshot.cn/) 注册并获取 API Key，然后设置环境变量：
 
 ```bash
-$env:AI_QWEN_ENABLED="true"
-$env:AI_QWEN_API_KEY="你的 API Key"
+# Windows PowerShell
+$env:AI_KIMI_ENABLED="true"
+$env:AI_KIMI_API_KEY="你的 Kimi API Key"
+
+# Linux / macOS
+export AI_KIMI_ENABLED="true"
+export AI_KIMI_API_KEY="你的 Kimi API Key"
 ```
+
+> Kimi 使用 OpenAI 兼容的 Chat Completions 格式，模型默认为 `kimi-k2.6`（多模态视觉模型）。也可通过 `AI_KIMI_MODEL` 环境变量切换模型。
 
 ### Flyway 数据库迁移
 

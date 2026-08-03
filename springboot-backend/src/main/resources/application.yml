@@ -73,8 +73,15 @@ file:
 cors:
   allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3002,http://localhost:3003,http://localhost:3004}
 
-# AI 视觉识别配置（阿里百炼通义千问）
+# AI 视觉识别配置（Kimi 月之暗面 Vision API）
 ai:
+  kimi:
+    enabled: ${AI_KIMI_ENABLED:true}
+    api-key: ${AI_KIMI_API_KEY:}
+    model: ${AI_KIMI_MODEL:kimi-k2.6}
+    timeout: ${AI_KIMI_TIMEOUT:120000}
+    max-image-size: ${AI_KIMI_MAX_IMAGE_SIZE:512000}
+  # 旧配置兼容（阿里百炼通义千问，已废弃）
   qwen:
     enabled: ${AI_QWEN_ENABLED:false}
     api-key: ${AI_QWEN_API_KEY:}

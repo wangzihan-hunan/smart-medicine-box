@@ -16,15 +16,14 @@ import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * AI视觉药方识别服务类
- * 核心功能：基于阿里百炼通义千问Vision API实现药方图片智能识别，
- * 支持提取药品名称、规格、用法用量、频次、数量、诊断结果、医生、医院、日期等信息，
+ * 核心功能：基于 Kimi（月之暗面）Vision API 实现药方图片智能识别，
+ * 使用 OpenAI 兼容的 Chat Completions 格式，支持提取药品名称、规格、用法用量等信息，
  * 集成套餐用量检查，支持图片压缩、API调用、响应解析、JSON提取等完整流程
  */
 @Service
@@ -32,27 +31,27 @@ public class AIVisionRecognitionService {
 
     private static final Logger log = LoggerFactory.getLogger(AIVisionRecognitionService.class);
 
-    // 阿里云百炼多模态生成API地址
-    private static final String API_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation";
+    // Kimi API Chat Completions 端点
+    private static final String API_URL = "https://api.moonshot.cn/v1/chat/completions";
 
-    // API密钥，优先使用配置文件，回退到环境变量 AI_QWEN_API_KEY
-    @Value("${ai.qwen.api-key:${AI_QWEN_API_KEY:}}")
+    // API密钥，优先使用 kimi 配置，回退到旧的 qwen 配置
+    @Value("${ai.kimi.api-key:${ai.qwen.api-key:${AI_QWEN_API_KEY:}}}")
     private String apiKey;
 
-    // 使用的模型名称（配置项：ai.qwen.model，默认qwen-vl-max）
-    @Value("${ai.qwen.model:qwen-vl-max}")
+    // 使用的模型名称，默认 kimi-k2.6（Kimi 多模态视觉模型）
+    @Value("${ai.kimi.model:${ai.qwen.model:kimi-k2.6}}")
     private String model;
 
-    // 是否启用AI识别服务（配置项：ai.qwen.enabled，默认false）
-    @Value("${ai.qwen.enabled:false}")
+    // 是否启用AI识别服务
+    @Value("${ai.kimi.enabled:${ai.qwen.enabled:false}}")
     private boolean enabled;
 
-    // API调用超时时间（毫秒，配置项：ai.qwen.timeout，默认30000）
-    @Value("${ai.qwen.timeout:30000}")
+    // API调用超时时间（毫秒）
+    @Value("${ai.kimi.timeout:${ai.qwen.timeout:60000}}")
     private int timeout;
 
-    // 图片最大压缩后大小（字节，配置项：ai.qwen.max-image-size，默认512000）
-    @Value("${ai.qwen.max-image-size:512000}")
+    // 图片最大压缩后大小（字节）
+    @Value("${ai.kimi.max-image-size:${ai.qwen.max-image-size:512000}}")
     private int maxImageSize;
 
     // JSON序列化工具
@@ -85,9 +84,9 @@ public class AIVisionRecognitionService {
                 .build();
 
         if (!enabled || apiKey == null || apiKey.trim().isEmpty()) {
-            log.warn("AI Vision 识别服务未启用。请配置 ai.qwen.api-key 和 ai.qwen.enabled=true");
+            log.warn("AI Vision 识别服务未启用。请配置 ai.kimi.api-key 和 ai.kimi.enabled=true");
         } else {
-            log.info("AI Vision 识别服务已初始化，模型: {}", model);
+            log.info("AI Vision 识别服务已初始化 (Kimi), 模型: {}", model);
         }
     }
 
@@ -152,11 +151,10 @@ public class AIVisionRecognitionService {
             log.info("AI 识别请求, 用户: {}, 文件名: {}, 原始大小: {} bytes, 压缩后 Base64 长度: {}",
                     userId, imageFile.getOriginalFilename(), imageBytes.length, base64Image.length());
 
-            // 2. 构造请求体
+            // 2. 构造 OpenAI 兼容格式请求体
             String requestBody = buildRequestBody(base64Image, mimeType);
 
             // 3. 调用 API + 扣减用量
-            // finally 块确保无论 API 调用成功/失败/网络异常，都扣减用量
             String responseBody;
             try {
                 responseBody = callApi(requestBody);
@@ -166,7 +164,7 @@ public class AIVisionRecognitionService {
                 }
             }
 
-            // 4. 解析响应
+            // 4. 解析 OpenAI 兼容格式响应
             MedicineRecognitionResponse result = parseResponse(responseBody);
 
             long cost = System.currentTimeMillis() - startTime;
@@ -191,7 +189,8 @@ public class AIVisionRecognitionService {
     }
 
     /**
-     * 构建 API 请求体
+     * 构建 OpenAI 兼容格式的 API 请求体
+     * Kimi API 使用标准 Chat Completions 格式，图片通过 image_url 类型传入
      */
     private String buildRequestBody(String base64Image, String mimeType) throws JsonProcessingException {
         String prompt = "你是一个专业的药方识别专家。请仔细分析这张药方图片，提取以下信息并以严格的JSON格式返回：\n" +
@@ -217,44 +216,44 @@ public class AIVisionRecognitionService {
                 "4. 用法用量要具体，如'每次1片，每日3次'\n" +
                 "5. 数量要包含单位，如'7片'或'1盒'";
 
-        java.util.Map<String, Object> request = new java.util.HashMap<>();
-        request.put("model", model);
+        String dataUrl = "data:" + mimeType + ";base64," + base64Image;
 
-        java.util.Map<String, Object> systemMessage = new java.util.HashMap<>();
-        systemMessage.put("role", "system");
-        systemMessage.put("content", "你是专业的药方识别专家，擅长从图片中提取药品信息。");
+        // 构建 user message（OpenAI 兼容格式：image_url + text）
+        java.util.Map<String, Object> imageUrlObj = new java.util.HashMap<>();
+        imageUrlObj.put("url", dataUrl);
 
-        java.util.Map<String, Object> imageContent = new java.util.HashMap<>();
-        imageContent.put("image", "data:" + mimeType + ";base64," + base64Image);
-        java.util.Map<String, Object> textContent = new java.util.HashMap<>();
-        textContent.put("text", prompt);
-        java.util.List<java.util.Map<String, Object>> userContents = new java.util.ArrayList<>();
-        userContents.add(imageContent);
-        userContents.add(textContent);
+        java.util.Map<String, Object> imagePart = new java.util.HashMap<>();
+        imagePart.put("type", "image_url");
+        imagePart.put("image_url", imageUrlObj);
+
+        java.util.Map<String, Object> textPart = new java.util.HashMap<>();
+        textPart.put("type", "text");
+        textPart.put("text", prompt);
+
+        java.util.List<java.util.Map<String, Object>> userContent = new java.util.ArrayList<>();
+        userContent.add(imagePart);
+        userContent.add(textPart);
 
         java.util.Map<String, Object> userMessage = new java.util.HashMap<>();
         userMessage.put("role", "user");
-        userMessage.put("content", userContents);
+        userMessage.put("content", userContent);
 
+        // 构建 messages 数组（Kimi 多模态推荐只使用 user 消息）
         java.util.List<java.util.Map<String, Object>> messages = new java.util.ArrayList<>();
-        messages.add(systemMessage);
         messages.add(userMessage);
 
-        java.util.Map<String, Object> input = new java.util.HashMap<>();
-        input.put("messages", messages);
-        request.put("input", input);
-
-        java.util.Map<String, Object> parameters = new java.util.HashMap<>();
-        parameters.put("max_tokens", 2048);
-        parameters.put("temperature", 0.1);
-        parameters.put("top_p", 0.1);
-        request.put("parameters", parameters);
+        // 构建完整请求体（OpenAI 兼容格式）
+        java.util.Map<String, Object> request = new java.util.HashMap<>();
+        request.put("model", model);
+        request.put("messages", messages);
+        request.put("max_tokens", 2048);
+        // kimi-k2.6 模型要求 temperature 必须为 1，不设置 temperature 使用默认值
 
         return objectMapper.writeValueAsString(request);
     }
 
     /**
-     * 调用百炼 API
+     * 调用 Kimi API
      */
     private String callApi(String requestBody) throws IOException {
         RequestBody body = RequestBody.create(requestBody, MediaType.parse("application/json; charset=utf-8"));
@@ -266,12 +265,16 @@ public class AIVisionRecognitionService {
                 .post(body)
                 .build();
 
+        log.debug("AI API 请求体长度: {} chars, 模型: {}", requestBody.length(), model);
+
         try (Response response = httpClient.newCall(request).execute()) {
             String responseBody = response.body() != null ? response.body().string() : "";
 
             if (!response.isSuccessful()) {
-                log.error("AI API 调用失败, HTTP状态码: {}, 响应: {}", response.code(), responseBody);
-                throw new IOException("AI API 调用失败: HTTP " + response.code());
+                log.error("AI API 调用失败, HTTP状态码: {}, 响应: {}", response.code(),
+                        responseBody.length() > 500 ? responseBody.substring(0, 500) : responseBody);
+                throw new IOException("AI API 调用失败: HTTP " + response.code() + " - " +
+                        (responseBody.length() > 200 ? responseBody.substring(0, 200) : responseBody));
             }
 
             return responseBody;
@@ -279,15 +282,17 @@ public class AIVisionRecognitionService {
     }
 
     /**
-     * 解析 API 响应
+     * 解析 OpenAI 兼容格式的 API 响应
+     * Kimi 返回格式：{ "choices": [{ "message": { "content": "..." } }] }
      */
     private MedicineRecognitionResponse parseResponse(String responseBody) {
         try {
             JsonNode root = objectMapper.readTree(responseBody);
 
-            // 检查 API 错误
-            if (root.has("code") && root.get("code").asInt() != 200) {
-                String errorMessage = root.has("message") ? root.get("message").asText() : "未知错误";
+            // 检查 API 错误（OpenAI 兼容格式：{ "error": { "message": "..." } }）
+            if (root.has("error")) {
+                JsonNode errorNode = root.get("error");
+                String errorMessage = errorNode.has("message") ? errorNode.get("message").asText() : "未知错误";
                 log.error("AI API 返回错误: {}", errorMessage);
                 return MedicineRecognitionResponse.builder()
                         .success(false)
@@ -295,14 +300,17 @@ public class AIVisionRecognitionService {
                         .build();
             }
 
-            // 提取内容
+            // 提取内容（OpenAI 兼容格式：choices[0].message.content）
             String content = "";
-            if (root.has("output") && root.get("output").has("choices")) {
-                JsonNode choices = root.get("output").get("choices");
-                if (choices.isArray() && choices.size() > 0) {
-                    JsonNode message = choices.get(0).get("message");
-                    if (message != null && message.has("content")) {
-                        content = message.get("content").asText();
+            if (root.has("choices") && root.get("choices").isArray()) {
+                JsonNode choices = root.get("choices");
+                if (choices.size() > 0) {
+                    JsonNode firstChoice = choices.get(0);
+                    if (firstChoice.has("message")) {
+                        JsonNode message = firstChoice.get("message");
+                        if (message.has("content")) {
+                            content = message.get("content").asText();
+                        }
                     }
                 }
             }
