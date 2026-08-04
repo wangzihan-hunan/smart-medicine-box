@@ -165,7 +165,7 @@
           :show-file-list="false"
           :auto-upload="false"
           :on-change="handleImageSelect"
-          accept="image/*"
+          accept="image/jpeg,image/png,image/gif,image/webp"
         >
           <div class="upload-area">
             <el-icon class="upload-icon"><Camera /></el-icon>
@@ -423,48 +423,67 @@ function closeModal() {
   form.lowStockThreshold = 5
 }
 
+/** 支持的图片文件类型 */
+const SUPPORTED_IMAGE_TYPES = ['jpg', 'jpeg', 'png', 'gif', 'webp']
+const SUPPORTED_IMAGE_TYPES_TEXT = SUPPORTED_IMAGE_TYPES.map(t => t.toUpperCase()).join('、')
+
+/** 验证文件扩展名是否在支持列表中 */
+function isValidImageFile(file) {
+  if (!file || !file.name) return false
+  const ext = file.name.split('.').pop().toLowerCase()
+  return SUPPORTED_IMAGE_TYPES.includes(ext)
+}
+
 // 处理图片选择和识别
 async function handleImageSelect(file) {
-  // 验证是否为图片文件
-  if (file.raw && file.raw.type.startsWith('image/')) {
-    recognizeLoading.value = true
-    recognizedText.value = ''
-    recognizedInfo.value = null
-    
-    try {
-      // 构造FormData上传图片
-      const formData = new FormData()
-      formData.append('image', file.raw)
-      
-      // 调用图片识别API
-      const response = await medicineAPI.recognize(formData)
-      
-      if (response.data && response.data.success) {
-        // 保存识别到的原始文本
-        recognizedText.value = response.data.recognizedText || ''
-        
-        // 保存识别出的药品信息并填充表单
-        const info = response.data.medicineInfo
-        if (info) {
-          form.name = info.name || ''
-          form.category = info.category || ''
-          form.spec = info.spec || ''
-          form.manufacturer = info.manufacturer || ''
-          recognizedInfo.value = info
-        }
-        
-        ElMessage.success(response.message || '识别成功')
-      } else {
-        ElMessage.warning(response.message || '未识别到药品信息')
+  // 验证是否为支持的图片格式
+  if (!file.raw || !isValidImageFile(file.raw)) {
+    ElMessage.warning(`请选择有效的图片文件，支持格式：${SUPPORTED_IMAGE_TYPES_TEXT}`)
+    return
+  }
+
+  recognizeLoading.value = true
+  recognizedText.value = ''
+  recognizedInfo.value = null
+
+  try {
+    // 构造FormData上传图片
+    const formData = new FormData()
+    formData.append('image', file.raw)
+
+    // 调用图片识别API
+    const response = await medicineAPI.recognize(formData)
+
+    if (response && response.success) {
+      // 保存识别到的原始文本
+      recognizedText.value = response.recognizedText || ''
+
+      // 保存识别出的药品信息并填充表单
+      const info = response.medicineInfo
+      if (info) {
+        form.name = info.name || ''
+        form.category = info.category || ''
+        form.spec = info.spec || ''
+        form.manufacturer = info.manufacturer || ''
+        recognizedInfo.value = info
       }
-    } catch (error) {
-      console.error('图片识别失败:', error)
-      ElMessage.error(error.message || '图片识别失败，请检查网络或重试')
-    } finally {
-      recognizeLoading.value = false
+
+      ElMessage.success(response.message || '识别成功')
+    } else {
+      ElMessage.warning(response?.message || '未识别到药品信息')
     }
-  } else {
-    ElMessage.warning('请选择有效的图片文件')
+  } catch (error) {
+    console.error('图片识别失败:', error)
+    // 优先使用后端返回的具体错误信息，其次使用通用提示
+    const errMsg = error.message || '图片识别失败，请检查网络或重试'
+    // 仅在错误信息不包含格式提示时，补充支持格式
+    if (errMsg.includes('格式') || errMsg.includes('JPG') || errMsg.includes('PNG')) {
+      ElMessage.error(errMsg)
+    } else {
+      ElMessage.error(`${errMsg}（支持格式：${SUPPORTED_IMAGE_TYPES_TEXT}）`)
+    }
+  } finally {
+    recognizeLoading.value = false
   }
 }
 

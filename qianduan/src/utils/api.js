@@ -416,11 +416,12 @@ export const medicineAPI = {
    * @param {number} id - 药品 ID
    * @returns {Promise<Object>} */
   delete: (id) => instance.delete(`/medicines/${id}`),
-  /** 图片识别药品（上传图片）
+  /** 图片识别药品（上传图片，AI 识别耗时较长，超时设为 130 秒）
    * @param {FormData} formData - 图片表单数据
    * @returns {Promise<Object>} */
   recognize: (formData) => instance.post('/medicines/recognize', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 130000
   }),
   /** 获取药品分类列表（带缓存）
    * @returns {Promise<Object>} */

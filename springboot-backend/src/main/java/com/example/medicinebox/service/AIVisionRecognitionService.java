@@ -145,11 +145,18 @@ public class AIVisionRecognitionService {
         try {
             // 1. 图片压缩并转 Base64
             byte[] imageBytes = imageFile.getBytes();
-            String base64Image = ImageUtils.compressAndEncodeToBase64(imageBytes, maxImageSize);
-            String mimeType = ImageUtils.getMimeType(imageFile.getOriginalFilename());
+            String originalFilename = imageFile.getOriginalFilename();
+            String mimeType = ImageUtils.getMimeType(originalFilename);
 
-            log.info("AI 识别请求, 用户: {}, 文件名: {}, 原始大小: {} bytes, 压缩后 Base64 长度: {}",
-                    userId, imageFile.getOriginalFilename(), imageBytes.length, base64Image.length());
+            // WebP 格式警告：Java ImageIO 不支持 WebP，无法压缩，直接发送原始字节
+            if (mimeType != null && mimeType.contains("webp")) {
+                log.warn("WebP 格式图片，Java ImageIO 不支持压缩，将直接发送原始字节到 AI API");
+            }
+
+            String base64Image = ImageUtils.compressAndEncodeToBase64(imageBytes, maxImageSize);
+
+            log.info("AI 识别请求, 用户: {}, 文件名: {}, 原始大小: {} bytes, MIME: {}, 压缩后 Base64 长度: {}",
+                    userId, originalFilename, imageBytes.length, mimeType, base64Image.length());
 
             // 2. 构造 OpenAI 兼容格式请求体
             String requestBody = buildRequestBody(base64Image, mimeType);
@@ -277,6 +284,10 @@ public class AIVisionRecognitionService {
                         (responseBody.length() > 200 ? responseBody.substring(0, 200) : responseBody));
             }
 
+            // 记录原始响应用于调试
+            log.debug("AI API 原始响应 (前500字符): {}",
+                    responseBody.length() > 500 ? responseBody.substring(0, 500) : responseBody);
+
             return responseBody;
         }
     }
@@ -316,10 +327,11 @@ public class AIVisionRecognitionService {
             }
 
             if (content == null || content.trim().isEmpty()) {
-                log.warn("AI 响应内容为空");
+                log.warn("AI 响应内容为空, 原始响应(前300字符): {}",
+                        responseBody.length() > 300 ? responseBody.substring(0, 300) : responseBody);
                 return MedicineRecognitionResponse.builder()
                         .success(false)
-                        .message("AI 未能识别出内容，请尝试重新上传清晰的图片")
+                        .message("AI 未能识别出内容，请尝试：1) 确保图片清晰可见 2) 使用 JPG/PNG 格式 3) 重新拍照上传")
                         .build();
             }
 

@@ -2,7 +2,9 @@ package com.example.medicinebox.service;
 
 import com.example.medicinebox.dto.response.MedicineRecognitionResponse;
 import com.example.medicinebox.entity.Medicine;
+import com.example.medicinebox.entity.ReferenceMedicine;
 import com.example.medicinebox.repository.MedicineRepository;
+import com.example.medicinebox.repository.ReferenceMedicineRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -12,7 +14,9 @@ import java.util.stream.Collectors;
 
 /**
  * 药品智能匹配服务类
- * 核心功能：将OCR/AI识别的药品信息与数据库中已有药品进行模糊匹配，
+ * 核心功能：将OCR/AI识别的药品信息与数据库进行两层模糊匹配：
+ *   第一层：用户本地库存（优先，避免重复录入）
+ *   第二层：参考药品标准库（兜底，补全标准化药品信息）
  * 使用 Jaro-Winkler 距离算法计算字符串相似度，返回匹配结果供用户确认入库
  */
 @Service
@@ -21,16 +25,24 @@ public class MedicineMatchingService extends BaseService {
     private static final Logger log = LoggerFactory.getLogger(MedicineMatchingService.class);
 
     private final MedicineRepository medicineRepository;
+    private final ReferenceMedicineRepository referenceMedicineRepository;
 
     // Jaro-Winkler 匹配阈值：相似度 >= 此值视为匹配成功
     private static final double MATCH_THRESHOLD = 0.75;
     // 高置信度阈值：相似度 >= 此值视为高置信度匹配
     private static final double HIGH_CONFIDENCE_THRESHOLD = 0.90;
 
+    // 参考库匹配结果缓存（避免每次匹配都全表扫描）
+    private List<ReferenceMedicine> referenceCache;
+    private long referenceCacheTime = 0;
+    private static final long CACHE_TTL = 30 * 60 * 1000; // 30 分钟
+
     public MedicineMatchingService(MedicineRepository medicineRepository,
+                                   ReferenceMedicineRepository referenceMedicineRepository,
                                    com.example.medicinebox.repository.UserRepository userRepository) {
         super(userRepository);
         this.medicineRepository = medicineRepository;
+        this.referenceMedicineRepository = referenceMedicineRepository;
     }
 
     /**
@@ -58,7 +70,10 @@ public class MedicineMatchingService extends BaseService {
     }
 
     /**
-     * 匹配单个药品
+     * 匹配单个药品（两层匹配）
+     * 第一层：用户本地库存 → 匹配成功则更新库存
+     * 第二层：参考药品标准库 → 匹配成功则补全标准化信息
+     * 两层均未匹配 → 作为新药品入库
      */
     private MedicineMatchResult matchSingle(MedicineRecognitionResponse.MedicineInfo info,
                                             List<Medicine> userMedicines) {
@@ -67,6 +82,8 @@ public class MedicineMatchingService extends BaseService {
         }
 
         String recognizedName = info.getName().trim();
+
+        // 第一层：用户本地库存匹配
         Medicine bestMatch = null;
         double bestScore = 0;
 
@@ -79,10 +96,44 @@ public class MedicineMatchingService extends BaseService {
         }
 
         if (bestScore >= MATCH_THRESHOLD && bestMatch != null) {
-            return MedicineMatchResult.matched(info, bestMatch, bestScore);
+            log.debug("第一层匹配成功: '{}' -> '{}' (相似度: {:.1f}%)",
+                    recognizedName, bestMatch.getName(), bestScore * 100);
+            return MedicineMatchResult.matched(info, bestMatch, bestScore, "USER");
+        }
+
+        // 第二层：参考药品标准库匹配（兜底）
+        List<ReferenceMedicine> references = getReferenceMedicines();
+        ReferenceMedicine bestRef = null;
+        double bestRefScore = 0;
+
+        for (ReferenceMedicine ref : references) {
+            double score = calculateSimilarity(recognizedName, ref.getName());
+            if (score > bestRefScore) {
+                bestRefScore = score;
+                bestRef = ref;
+            }
+        }
+
+        if (bestRefScore >= MATCH_THRESHOLD && bestRef != null) {
+            log.info("第二层参考库匹配成功: '{}' -> '{}' (相似度: {:.1f}%, 分类: {})",
+                    recognizedName, bestRef.getName(), bestRefScore * 100, bestRef.getCategory());
+            return MedicineMatchResult.matchedFromReference(info, bestRef, bestRefScore);
         }
 
         return MedicineMatchResult.unmatched(info);
+    }
+
+    /**
+     * 获取参考药品列表（带缓存）
+     */
+    private List<ReferenceMedicine> getReferenceMedicines() {
+        long now = System.currentTimeMillis();
+        if (referenceCache == null || (now - referenceCacheTime) > CACHE_TTL) {
+            referenceCache = referenceMedicineRepository.findAll();
+            referenceCacheTime = now;
+            log.debug("参考药品库缓存已刷新, 共 {} 条", referenceCache.size());
+        }
+        return referenceCache;
     }
 
     /**
@@ -191,12 +242,12 @@ public class MedicineMatchingService extends BaseService {
                     addedMedicines.add(existing);
                 }
             } else {
-                // 新增药品
+                // 新增药品：优先使用参考库的标准化信息
                 Medicine medicine = new Medicine();
                 medicine.setName(item.getName());
-                medicine.setSpec(item.getSpec());
-                medicine.setCategory(item.getCategory());
-                medicine.setManufacturer(item.getManufacturer());
+                medicine.setSpec(item.getSpec() != null ? item.getSpec() : "");
+                medicine.setCategory(item.getCategory() != null ? item.getCategory() : "");
+                medicine.setManufacturer(item.getManufacturer() != null ? item.getManufacturer() : "");
                 medicine.setStock(item.getQuantity() != null ? item.getQuantity() : 1);
                 medicine.setUserId(userId);
                 medicine = medicineRepository.save(medicine);
@@ -221,26 +272,55 @@ public class MedicineMatchingService extends BaseService {
         private double similarity;
         private boolean matched;
         private String confidence; // HIGH / MEDIUM / NONE
+        private String matchSource; // USER / REFERENCE / NONE
+        // 参考库匹配时，携带标准化药品信息
+        private String referenceName;
+        private String referenceCategory;
+        private String referenceSpec;
+        private String referenceManufacturer;
+        private String referenceDosage;
 
         private MedicineMatchResult() {}
 
+        /** 用户本地库存匹配成功 */
         static MedicineMatchResult matched(MedicineRecognitionResponse.MedicineInfo info,
-                                           Medicine medicine, double similarity) {
+                                           Medicine medicine, double similarity, String source) {
             MedicineMatchResult result = new MedicineMatchResult();
             result.recognizedInfo = info;
             result.matchedMedicine = medicine;
             result.similarity = similarity;
             result.matched = true;
             result.confidence = similarity >= HIGH_CONFIDENCE_THRESHOLD ? "HIGH" : "MEDIUM";
+            result.matchSource = source;
             return result;
         }
 
+        /** 参考药品库匹配成功（补全标准化信息） */
+        static MedicineMatchResult matchedFromReference(MedicineRecognitionResponse.MedicineInfo info,
+                                                        ReferenceMedicine ref, double similarity) {
+            MedicineMatchResult result = new MedicineMatchResult();
+            result.recognizedInfo = info;
+            result.matchedMedicine = null;
+            result.similarity = similarity;
+            result.matched = true;
+            result.confidence = similarity >= HIGH_CONFIDENCE_THRESHOLD ? "HIGH" : "MEDIUM";
+            result.matchSource = "REFERENCE";
+            result.referenceName = ref.getName();
+            result.referenceCategory = ref.getCategory();
+            result.referenceSpec = ref.getSpec();
+            result.referenceManufacturer = ref.getManufacturer();
+            result.referenceDosage = ref.getDosage();
+            return result;
+        }
+
+        /** 两层均未匹配 */
         static MedicineMatchResult unmatched(MedicineRecognitionResponse.MedicineInfo info) {
             MedicineMatchResult result = new MedicineMatchResult();
             result.recognizedInfo = info;
             result.matched = false;
             result.similarity = 0;
             result.confidence = "NONE";
+            result.matchSource = "NONE";
             return result;
         }
 
@@ -249,6 +329,12 @@ public class MedicineMatchingService extends BaseService {
         public double getSimilarity() { return similarity; }
         public boolean isMatched() { return matched; }
         public String getConfidence() { return confidence; }
+        public String getMatchSource() { return matchSource; }
+        public String getReferenceName() { return referenceName; }
+        public String getReferenceCategory() { return referenceCategory; }
+        public String getReferenceSpec() { return referenceSpec; }
+        public String getReferenceManufacturer() { return referenceManufacturer; }
+        public String getReferenceDosage() { return referenceDosage; }
     }
 
     /**

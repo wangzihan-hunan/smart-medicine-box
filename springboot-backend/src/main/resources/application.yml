@@ -40,7 +40,7 @@ spring:
           time_zone: Asia/Shanghai
 
   flyway:
-    enabled: false
+    enabled: true
 
   servlet:
     multipart:

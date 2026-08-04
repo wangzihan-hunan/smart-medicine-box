@@ -125,7 +125,7 @@ public class MedicineRecognitionService {
             if (image == null) {
                 return MedicineRecognitionResponse.builder()
                         .success(false)
-                        .message("无法读取图片，请检查文件格式是否正确")
+                        .message("无法读取图片，请检查文件格式是否正确（支持格式：JPG、JPEG、PNG、GIF、BMP）")
                         .build();
             }
             // 调用Tesseract进行OCR识别
