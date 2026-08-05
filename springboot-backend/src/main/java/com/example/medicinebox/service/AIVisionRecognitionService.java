@@ -143,19 +143,16 @@ public class AIVisionRecognitionService {
 
         long startTime = System.currentTimeMillis();
         try {
-            // 1. 图片压缩并转 Base64
+            // 1. 图片预处理：读取任意格式（TwelveMonkeys 支持 WebP/BMP/TIFF），统一转为 JPEG
             byte[] imageBytes = imageFile.getBytes();
             String originalFilename = imageFile.getOriginalFilename();
-            String mimeType = ImageUtils.getMimeType(originalFilename);
 
-            // WebP 格式警告：Java ImageIO 不支持 WebP，无法压缩，直接发送原始字节
-            if (mimeType != null && mimeType.contains("webp")) {
-                log.warn("WebP 格式图片，Java ImageIO 不支持压缩，将直接发送原始字节到 AI API");
-            }
+            ImageUtils.PreprocessResult preprocessResult =
+                    ImageUtils.preprocessForAI(imageBytes, maxImageSize, originalFilename);
+            String base64Image = preprocessResult.getBase64();
+            String mimeType = preprocessResult.getMimeType();
 
-            String base64Image = ImageUtils.compressAndEncodeToBase64(imageBytes, maxImageSize);
-
-            log.info("AI 识别请求, 用户: {}, 文件名: {}, 原始大小: {} bytes, MIME: {}, 压缩后 Base64 长度: {}",
+            log.info("AI 识别请求, 用户: {}, 文件名: {}, 原始大小: {} bytes, MIME: {}, 处理后 Base64 长度: {}",
                     userId, originalFilename, imageBytes.length, mimeType, base64Image.length());
 
             // 2. 构造 OpenAI 兼容格式请求体

@@ -165,7 +165,7 @@
           :show-file-list="false"
           :auto-upload="false"
           :on-change="handleImageSelect"
-          accept="image/jpeg,image/png,image/gif,image/webp"
+          accept="image/jpeg,image/png,image/gif,image/webp,image/bmp"
         >
           <div class="upload-area">
             <el-icon class="upload-icon"><Camera /></el-icon>
@@ -424,7 +424,7 @@ function closeModal() {
 }
 
 /** 支持的图片文件类型 */
-const SUPPORTED_IMAGE_TYPES = ['jpg', 'jpeg', 'png', 'gif', 'webp']
+const SUPPORTED_IMAGE_TYPES = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp']
 const SUPPORTED_IMAGE_TYPES_TEXT = SUPPORTED_IMAGE_TYPES.map(t => t.toUpperCase()).join('、')
 
 /** 验证文件扩展名是否在支持列表中 */
