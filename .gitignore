@@ -14,3 +14,5 @@ build/
 uploads/
 .brooks-lint-history.json
 test_rx.png
+token.txt
+test_medicine.*

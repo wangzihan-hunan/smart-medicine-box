@@ -194,7 +194,7 @@
 
 <script setup>
 // 导入Vue组合式API
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 // 导入Element Plus消息提示和弹窗组件
 import { ElMessage, ElMessageBox } from 'element-plus'
 // 导入Vue路由相关函数
@@ -318,13 +318,20 @@ function validateForm() {
   return isValid
 }
 
+// 验证码刷新锁，防止并发重复请求
+let captchaLoading = false
+
 // 刷新字母验证码
 async function refreshCaptcha() {
+  if (captchaLoading) return
+  captchaLoading = true
   try {
     const res = await authAPI.getCaptchaText()
     captchaText.value = res.captcha || ''
   } catch (e) {
     captchaText.value = '获取失败'
+  } finally {
+    captchaLoading = false
   }
   form.captcha = ''
   errors.captcha = ''
@@ -333,6 +340,11 @@ async function refreshCaptcha() {
 // 页面加载时获取验证码
 onMounted(() => {
   refreshCaptcha()
+})
+
+// 组件卸载时释放验证码加载锁，防止锁残留导致重新进入时无法加载
+onBeforeUnmount(() => {
+  captchaLoading = false
 })
 
 // 处理登录提交

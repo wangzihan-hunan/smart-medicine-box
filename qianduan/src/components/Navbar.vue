@@ -121,6 +121,8 @@ async function fetchUnreadCount() {
       unreadCount.value = data.unreadCount
     }
   } catch (error) {
+    // 请求被取消（页面切换导致）是正常行为，静默忽略
+    if (error.message?.includes('已取消')) return
     console.error('获取未读通知数失败:', error)
   }
 }

@@ -91,7 +91,7 @@ public class ImageUtils {
      * <p>JPEG 格式不支持透明通道，如果图片包含 alpha 通道（如 WebP 转码后的 ARGB 格式），
      * 直接编码为 JPEG 会导致图片数据损坏，API 无法解码。此方法在编码前将图片转换为标准 RGB 格式。
      */
-    private static BufferedImage ensureRGB(BufferedImage image) {
+    static BufferedImage ensureRGB(BufferedImage image) {
         if (image.getType() == BufferedImage.TYPE_INT_RGB) {
             return image;
         }
